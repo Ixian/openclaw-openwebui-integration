@@ -15,7 +15,14 @@
       "sources": [
         "src/openclaw_pipe_pkg/action.py:_*_JS*"
       ],
-      "files": "^(status-|subagent-drawer|tile-status-dialog|demos/status-dialog\\.)"
+      "files": "^(marvin-(live-)?activity-|status-|subagent-drawer|tile-status-dialog|demos/status-dialog\\.)"
+    },
+    "activity": {
+      "sources": [
+        "src/openclaw_pipe_pkg/activity_inline.py:_ACTIVITY_INLINE_JS",
+        "src/openclaw_pipe_pkg/activity_view.py:_ACTIVITY_VIEW_JS"
+      ],
+      "files": "^marvin-(live-)?activity-"
     }
   },
   "files": {
@@ -315,9 +322,19 @@
       "manual": true
     },
     "marvin-activity-light.png": {
-      "sha": "956830ea2ff78d27",
+      "sha": "ec0b62f0d2a2f944",
       "groups": {
-        "chrome": "7fafc5d6eb2e2997"
+        "chrome": "7fafc5d6eb2e2997",
+        "status": "f042e64ed62a72cd",
+        "activity": "79cf2555c2e7ed2d"
+      }
+    },
+    "marvin-live-activity-light.png": {
+      "sha": "b5252f5056b99e74",
+      "groups": {
+        "chrome": "7fafc5d6eb2e2997",
+        "status": "f042e64ed62a72cd",
+        "activity": "79cf2555c2e7ed2d"
       }
     },
     "media-turn-light.png": {

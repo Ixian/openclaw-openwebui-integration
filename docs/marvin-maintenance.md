@@ -8,6 +8,8 @@ The maintained source is [Ixian/openclaw-openwebui-integration](https://github.c
 
 We maintain the bridge's Python source, its generated Pipe and Status Action, tests, release manifest and update tooling. Open WebUI and OpenClaw remain official distributions. The homelab keeps its existing Docker Compose image digest. Updating this bridge changes Functions through Open WebUI's API, not a container image or a file edited inside a container.
 
+The fork owns the in-page Activity renderer delivered through Functions execute events. Browser tests cover its message selectors; an Open WebUI layout change can require an update to that renderer.
+
 The feature's presentation state is derived from Gateway events and read APIs. It does not patch Open WebUI's frontend bundle, OpenClaw's database, or the agent's instructions.
 
 ## Make an upstream update

@@ -1,4 +1,4 @@
-# Shared, bounded presentation state. This module performs no file or network I/O.
+# Bounded presentation state and read-only Gateway snapshots.
 MARVIN_RELEASE = "marvin-v1.0.0"
 ACTIVITY_STREAM = "bridge_activity"
 ACTIVITY_STREAMS = (ACTIVITY_STREAM, "command_output", "run_status", "plan", "lifecycle")

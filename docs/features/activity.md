@@ -4,6 +4,8 @@ The Marvin bridge adds a Task activity block to tool-using replies. Its summary 
 
 Applies to: Pipe and Status Action, installed together from the same Marvin release.
 
+<img src="../img/marvin-live-activity-light.png" alt="Live task steps and command output appear separately from the assistant answer" width="320">
+
 <img src="../img/marvin-activity-light.png" alt="Task progress and a command preview in the Activity panel" width="320">
 
 ## What the display means
@@ -33,6 +35,6 @@ A saved card is the last confirmed snapshot, with its update time. A newer run p
 
 ## Installation and versions
 
-This release is tested with Open WebUI 0.12.5 and OpenClaw 2026.10.9. It uses the existing [Status Action configuration](../configuration.md#state_dir) and paired Gateway connection. There are no new valves, Gateway plugins or agent instructions to install. Existing tools, questions, approvals and sub-agent controls remain handled by the upstream bridge.
+This release is tested with Open WebUI 0.12.5 and OpenClaw 2026.10.9. It uses the existing [Status Action configuration](../configuration.md#state_dir) and paired Gateway connection. Keep the existing [composer Status button](../configuration.md#composer_status_button) enabled for automatic restoration when opening a chat. There are no new valves, Gateway plugins or agent instructions to install. Existing tools, questions, approvals and sub-agent controls remain handled by the upstream bridge.
 
 See [maintaining the Marvin fork](../marvin-maintenance.md) for release checks, updates and rollback.
