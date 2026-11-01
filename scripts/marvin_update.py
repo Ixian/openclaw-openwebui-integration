@@ -101,3 +101,22 @@ def apply_release(api, release_dir, expected_hashes, backup_dir, idle_check, dat
         raise RuntimeError('Update failed; both Functions restored from backup') from original
     return {'release': manifest['release'], 'commit': manifest['commit'],
             'backup': str(backup_dir), 'hashes': {fid: manifest['artifacts'][fid]['sha256'] for fid in FILES}}
+
+
+def restore_backup(api, backup_dir, expected_hashes, idle_check):
+    """Restore only the paired Functions. The application database is untouched."""
+    backup = json.loads((Path(backup_dir) / 'functions.json').read_text())
+    before = backup['before']
+    if set(before) != set(FILES):
+        raise ValueError('Backup must contain both Functions')
+    for fid, row in before.items():
+        if sha(row['function']['content']) != backup['hashes'][fid]:
+            raise ValueError('Backup checksum mismatch')
+    installed = read_pair(api)
+    if {fid: sha(row['function']['content']) for fid, row in installed.items()} != expected_hashes:
+        raise ValueError('Installed Functions differ from the deployment lock')
+    idle_check()
+    for fid, row in before.items():
+        write_function(api, fid, row['function'], row['valves'])
+    verify_pair(api, before, backup['hashes'])
+    return backup['hashes']

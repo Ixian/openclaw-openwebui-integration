@@ -11,20 +11,23 @@ _ACTIVITY_VIEW_JS = r"""
     section.id = 'openclaw-status-section-activity';
     document.getElementById('openclaw-status-sections').prepend(section);
   }
+  Object.assign(section.style,{fontSize:'13px',lineHeight:'1.5',marginBottom:'16px',paddingBottom:'12px'});
   const opened = new Set([...section.querySelectorAll('details[open]')].map(e => e.dataset.call));
   const focused = document.activeElement && document.activeElement.dataset.activityFocus;
   section.replaceChildren();
   const add = (parent,tag,text) => {
     const el = document.createElement(tag); el.textContent = text || ''; parent.append(el); return el;
   };
-  add(section,'h3','Activity').style.fontWeight = '600';
-  add(section,'small','Bridge ' + D.release);
+  const heading=add(section,'h3','Activity');
+  Object.assign(heading.style,{fontSize:'11px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'8px',opacity:'.7'});
+  heading.title='Bridge '+D.release;
   if (D.error) add(section,'p',D.error).setAttribute('role','status');
   for (const [label,card] of [["Run plan",D.plan],["Task progress",D.card]]) {
   if (card) {
     const steps = card.steps || [];
     const done = steps.filter(s => s.status === 'completed').length;
-    add(section,'h4',label + (steps.length ? ' · '+done+'/'+steps.length+' complete' : ''));
+    const title=add(section,'h4',label + (steps.length ? ' · '+done+'/'+steps.length+' complete' : ''));
+    Object.assign(title.style,{fontWeight:'600',marginTop:'8px'});
     for (const step of steps) {
       add(section,'p',(step.status === 'completed' ? '✓ ' : step.status === 'in_progress' ? '● ' : '○ ') + step.step);
     }
@@ -39,11 +42,11 @@ _ACTIVITY_VIEW_JS = r"""
   if (D.historyLimited) add(section,'small','Showing recent activity; older calls are outside this view.');
   S.activityOutput = S.activityOutput || {};
   for (const call of D.calls || []) {
-    const detail=add(section,'details','');detail.dataset.call=call.id;detail.open=opened.has(call.id);
-    const summary=add(detail,'summary',call.status+' · '+call.title+(call.durationMs!=null ? ' · '+(call.durationMs/1000).toFixed(1)+'s' : ''));summary.style.cursor='pointer';
+    const detail=add(section,'details','');detail.dataset.call=call.id;detail.open=opened.has(call.id);detail.style.marginTop='10px';
+    const summary=add(detail,'summary',call.status[0].toUpperCase()+call.status.slice(1)+' · '+call.title+(call.durationMs!=null ? ' · '+(call.durationMs/1000).toFixed(1)+'s' : call.startedAt>0 ? ' · '+Math.max(0,Math.floor((Date.now()-call.startedAt)/1000))+'s' : ''));summary.style.cursor='pointer';
     const pre=add(detail,'pre',S.activityOutput[call.id] || call.output || 'No output received.');
     Object.assign(pre.style,{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'320px',overflow:'auto',fontSize:'12px'});
-    if(call.clipped) add(detail,'small','Preview clipped to the latest 8,000 characters.');
+    if(call.clipped && !S.activityOutput[call.id]) add(detail,'small','Preview clipped to the latest 8,000 characters.').dataset.activityClip='1';
     if(call.messageId) {
       const load=add(detail,'button','Load retained output'); load.dataset.activityFocus='load-'+call.id;
       load.onclick=async function(){
@@ -55,8 +58,11 @@ _ACTIVITY_VIEW_JS = r"""
       };
     }
     const copy=add(detail,'button','Copy'); copy.style.marginLeft='12px';
+    copy.dataset.activityFocus='copy-'+call.id;
     copy.onclick=()=>navigator.clipboard.writeText(pre.textContent).catch(()=>{copy.textContent='Copy failed';});
     const save=add(detail,'button','Download'); save.style.marginLeft='12px';
+    save.dataset.activityFocus='save-'+call.id;
+    for(const b of detail.querySelectorAll('button')) Object.assign(b.style,{border:'1px solid #9ca3af',borderRadius:'6px',padding:'3px 7px',fontSize:'12px',marginTop:'6px'});
     save.onclick=function(){
       const url=URL.createObjectURL(new Blob([pre.textContent],{type:'text/plain;charset=utf-8'}));
       const a=document.createElement('a');a.href=url;a.download='command-output.txt';a.click();
@@ -90,5 +96,5 @@ def _render_activity_output(data):
       S.activityOutput=S.activityOutput||{};
       S.activityOutput[D.callId]=D.available ? D.text+(D.truncated ? '\n\n[Gateway retained output is truncated.]' : '') : ('Output unavailable: '+D.reason);
       const e=[...document.querySelectorAll('#openclaw-status-section-activity details')].find(e=>e.dataset.call===D.callId);
-      if(e) e.querySelector('pre').textContent=S.activityOutput[D.callId];
+      if(e) {e.querySelector('pre').textContent=S.activityOutput[D.callId];e.querySelector('[data-activity-clip]')?.remove();}
     })();""".replace("__DATA__", _json_for_js(data))
