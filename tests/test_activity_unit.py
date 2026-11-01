@@ -136,6 +136,7 @@ class ActivityReadTests(unittest.IsolatedAsyncioTestCase):
         result = await p._activity_snapshot(Conn(), SESSION)
         self.assertEqual(result["card"]["revision"], 1)
         self.assertTrue(any(c["output"] == "output so far" for c in result["calls"]))
+        self.assertTrue(any(c["id"] == "old" and c["messageId"] == "result1" for c in result["calls"]))
 
     async def test_closed_or_foreign_dialog_never_reads_gateway(self):
         action = a.Action()

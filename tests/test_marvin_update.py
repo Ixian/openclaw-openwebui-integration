@@ -77,3 +77,5 @@ class UpdateTests(unittest.TestCase):
                 for fid in rows:
                     self.assertEqual(rows[fid]['valves'], original[fid]['valves'])
                     self.assertEqual(rows[fid]['function']['is_global'], False)
+                u.restore_backup(api, root / 'backup', result['hashes'], idle)
+                self.assertEqual(rows, original)

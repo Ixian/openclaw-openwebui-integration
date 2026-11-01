@@ -4890,6 +4890,7 @@ async def _activity_snapshot(conn, session):
     history = history_result if isinstance(history_result, dict) else {}
     refs = {}
     historical = _ActivityState()
+    recent_calls = {}
     for message in history.get("messages", []):
         if not isinstance(message, dict):
             continue
@@ -4899,13 +4900,15 @@ async def _activity_snapshot(conn, session):
             if event.get("stream") != "tool":
                 continue
             historical.feed({**event, "sessionKey": session, "runId": run})
+            recent_calls.update(copy.deepcopy(historical.calls))
         if message.get("role") == "toolResult" and message.get("toolCallId") and meta.get("id"):
             refs[message["toolCallId"]] = meta["id"]
         for block in message.get("content", []) if isinstance(message.get("content"), list) else []:
             if isinstance(block, dict) and block.get("type") in ("toolResult", "tool_result"):
                 tid = block.get("toolCallId") or block.get("tool_use_id")
-                if tid and meta.get("id"):
-                    refs[tid] = (block.get("__openclaw") or {}).get("id") or meta["id"]
+                mid = (block.get("__openclaw") or {}).get("id") or meta.get("id")
+                if tid and mid:
+                    refs[tid] = mid
     if not live:
         state = historical
     in_flight = history.get("inFlightRun") or {}
@@ -4926,7 +4929,11 @@ async def _activity_snapshot(conn, session):
     else:
         state.card = _activity_card(card_result, session)
     calls = []
-    for call in list(state.calls.values())[-20:]:
+    for old in recent_calls.values():
+        if old["status"] == "running":
+            old["status"] = "no retained result"
+    recent_calls.update(state.calls)
+    for call in list(recent_calls.values())[-20:]:
         calls.append({**call, "messageId": refs.get(call["id"])})
     return {"release": MARVIN_RELEASE, "card": state.card, "plan": state.plan,
             "cardError": bool(state.card_error), "calls": calls,
