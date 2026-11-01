@@ -40,7 +40,7 @@ After all checks pass and the working tree is clean:
 python3 scripts/marvin_release.py --out /tmp/marvin-release --ci-run PASSING_RUN_ID
 ```
 
-The output contains the matched Pipe, Status Action and `release.json`, including the source commit, passing CI run, upstream base, tested versions, image digest and SHA-256 of both Functions. Tag that source commit, publish the files together on the fork's GitHub Releases page, and deploy that exact set. The two Functions must have the same `MARVIN_RELEASE` constant. The Action refuses a mismatched activity connection.
+The output contains the matched Pipe, Status Action, versioned update/preflight helpers and `release.json`, including the source commit, passing CI run, upstream base, tested versions, image digest and SHA-256 of both Functions. Tag that source commit, publish the files together on the fork's GitHub Releases page, and deploy that exact set. The two Functions must have the same `MARVIN_RELEASE` constant. The Action refuses a mismatched activity connection.
 
 ## Deploy and recover
 

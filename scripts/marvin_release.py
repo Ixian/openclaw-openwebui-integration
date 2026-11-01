@@ -39,8 +39,13 @@ def package(root, destination, ci_run):
         artifacts[fid] = {'file': filename, 'sha256': digest(content)}
     if len(releases) != 1:
         raise ValueError('Pipe and Action versions differ')
+    support = {}
+    for filename in ('marvin_update.py', 'marvin_gateway_check.py'):
+        content = (root / 'scripts' / filename).read_text()
+        (destination / filename).write_text(content)
+        support[filename] = digest(content)
     manifest = {'release': releases.pop(), 'repository': 'https://github.com/Ixian/openclaw-openwebui-integration',
-                'commit': commit, 'upstream_base': UPSTREAM_BASE, 'artifacts': artifacts,
+                'commit': commit, 'upstream_base': UPSTREAM_BASE, 'artifacts': artifacts, 'support_files': support,
                 'validation': {'ci_run': int(ci_run), 'url': run['html_url']},
                 'tested': {'openwebui': '0.12.5', 'openclaw': '2026.10.9', 'python': '3.12',
                            'websockets': '17.3', 'image': IMAGE}}
