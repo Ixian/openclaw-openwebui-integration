@@ -561,8 +561,10 @@ class Scenes:
 
     def marvin_activity(self, page: Page) -> None:
         new_chat(page)
-        send(page, "E2E_MARVIN_ACTIVITY")
+        chat = send(page, "E2E_MARVIN_ACTIVITY")
         wait_js(page, "() => document.body.innerText.includes('ACTIVITY_DONE')", "the diagnostic finishing")
+        set_title(self.token, chat, "Gateway diagnostic check")
+        page.reload()
         page.locator('button[aria-label="OpenClaw status"]').click()
         section = page.locator('#openclaw-status-section-activity')
         section.get_by_text('Task progress · 2/2 complete', exact=True).wait_for(timeout=30_000)
