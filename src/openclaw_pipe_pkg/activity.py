@@ -242,7 +242,7 @@ class _ActivityState:
         return summary
 
     def inline_view(self):
-        return {"label": self.label(), "card": self.card, "plan": self.plan,
+        return {"label": self.label(), "observedAt": time.time_ns() // 1000, "card": self.card, "plan": self.plan,
                 "summary": self.summary, "cardError": bool(self.card_error), "status": self.status,
                 "calls": copy.deepcopy(list(self.calls.values())[-8:])}
 

@@ -559,6 +559,13 @@ class Scenes:
         self.background_chat: str | None = None
         self.long_chat: str | None = None
 
+    def marvin_live_activity(self, page: Page) -> None:
+        new_chat(page)
+        send(page, "E2E_MARVIN_ACTIVITY")
+        view = page.locator('[data-openclaw-activity="1"]')
+        view.get_by_text('ACTIVITY_FIRST_LINE', exact=False).wait_for(timeout=30_000)
+        self.s.shot(page, "marvin-live-activity", selector='[data-openclaw-activity="1"]')
+
     def marvin_activity(self, page: Page) -> None:
         new_chat(page)
         chat = send(page, "E2E_MARVIN_ACTIVITY")
@@ -1421,6 +1428,7 @@ def main(argv=None) -> int:
         browser = pw.chromium.launch()
         try:
             page = signed_in_page(browser, token, PHONE)
+            shooter.run("marvin-live-activity", scenes.marvin_live_activity, page)
             shooter.run("marvin-activity", scenes.marvin_activity, page)
             shooter.run("hero-tool-cards", scenes.hero, page)
             if scenes.hero_chat:

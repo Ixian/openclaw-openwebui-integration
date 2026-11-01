@@ -18,7 +18,7 @@ Titles use the tool's supplied title or description, or a file path for file too
 
 1. Open Status in the chat or under the relevant model's reply.
 2. Expand the command under Activity.
-3. Select **Load retained output** to fetch the message from the Gateway. This reads the retained transcript, not the clipped Open WebUI tool preview.
+3. Select **Load retained output** to fetch up to 1,000,000 characters of the message from the Gateway. This reads the retained transcript, not the clipped Open WebUI tool preview.
 4. Select **Copy** or **Download** to save the text currently displayed.
 
 The Gateway may report a result as missing, oversized or no longer visible. If the Gateway itself retained truncated content, the panel says so. Download cannot recover text the Gateway did not retain.

@@ -39,7 +39,7 @@ _ACTIVITY_INLINE_JS = r"""
      if(call.clipped)add(root,'small','Preview limited to the latest 8,000 characters. Open Status for retained output.');
     }
    }
-   if(V.status!=='running')add(root,'small','Response ended; unfinished task steps remain unfinished.');
+   if(V.status!=='running'&&[V.plan,V.card].some(c=>c&&(c.steps||[]).some(s=>s.status!=='completed')))add(root,'small','Some task steps remain unfinished.');
   }
   const C=G.contexts[chat];
   const users=document.querySelectorAll('.chat-user');
@@ -52,7 +52,7 @@ _ACTIVITY_INLINE_JS = r"""
  }
  const schedule=()=>{if(!G.queued){G.queued=true;requestAnimationFrame(mount);}};
  G.configure=C=>{if(C.chatId&&C.model)G.contexts[C.chatId]=C;schedule();};
- G.receive=D=>{G.items.set(D.activityId,D);while(G.items.size>30)G.items.delete(G.items.keys().next().value);schedule();};
+ G.receive=D=>{const old=G.items.get(D.activityId);if(old&&old.activity.observedAt>D.activity.observedAt)return;G.items.set(D.activityId,D);while(G.items.size>30)G.items.delete(G.items.keys().next().value);schedule();};
  G.observer=new MutationObserver(schedule);G.observer.observe(document.body,{childList:true,subtree:true});schedule();
 })();
 """

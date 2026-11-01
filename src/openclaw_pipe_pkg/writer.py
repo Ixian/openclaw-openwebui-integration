@@ -3021,8 +3021,15 @@ async def _activity_emit_inline(conn, emitter, item, chat_id, message_id, user_i
                 conn._activity_safe_targets.pop(next(iter(conn._activity_safe_targets)))
         async def send(event):
             return await _relay_emit_event(user_id, chat_id, target, event)
+        # A native input dialog holds execute events. Keep only the newest
+        # presentation of each activity rather than queuing every output tick.
+        for hold in _dialog_holds().values():
+            if hold.get("user_id") == user_id:
+                hold["held"][:] = [e for e in hold["held"] if not (
+                    e.get("chat_id") == chat_id and (e.get("data", {}).get("data") or {}).get("openclawActivityId") == item["id"])]
         safe = _dialog_safe_emitter(send, user_id, chat_id, target)
-        await safe({"type": "execute", "data": {"code": _render_activity_inline(chat_id, message_id, item)}})
+        await safe({"type": "execute", "data": {"code": _render_activity_inline(chat_id, message_id, item),
+                                                 "openclawActivityId": item["id"]}})
     except Exception:
         pass
 
