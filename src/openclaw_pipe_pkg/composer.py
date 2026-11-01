@@ -528,7 +528,9 @@ def _render_composer_button_js(*, session_id=None, model_prefixes=None, chat_id=
         "thinkingChipLabel": _COMPOSER_THINKING_CHIP_LABEL,
     }
     payload = json.dumps(config).replace("<", "\\u003c")
-    return _COMPOSER_BUTTON_JS_TEMPLATE.replace("__OPENCLAW_COMPOSER_CONFIG__", payload)
+    return (_COMPOSER_BUTTON_JS_TEMPLATE.replace("__OPENCLAW_COMPOSER_CONFIG__", payload) + "\n" + _ACTIVITY_INLINE_JS
+            + "\nwindow.__openclawActivity?.configure(" + json.dumps({"chatId": chat_id, "model": chat_model,
+                           "sessionId": session_id}).replace("<", "\\u003c") + ");")
 
 
 async def _emit_composer_button(__event_emitter__, *, session_id=None, model_id=None,

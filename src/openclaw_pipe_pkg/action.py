@@ -2882,6 +2882,23 @@ class Action:
         __event_emitter__ = _dialog_safe_emitter(
             __event_emitter__, (__user__ or {}).get("id"), body.get("chat_id"), body.get("id"))
         mode = body.get("mode")
+        if mode == "activity-restore":
+            chat_id, user_id = body.get("chat_id"), (__user__ or {}).get("id")
+            chat = await _load_owui_recent(chat_id, user_id) if chat_id and user_id else None
+            if chat is None:
+                return {"status": "error"}
+            for message in ((chat.get("history") or {}).get("messages") or {}).values():
+                for item in message.get("output") or []:
+                    if item.get("type") == _ACTIVITY_ITEM and isinstance(item.get("activity"), dict):
+                        await __event_emitter__({"type": "execute", "data": {"code": _render_activity_inline(chat_id, message["id"], item)}})
+            try:
+                conn, _ = await _get_action_connection(lambda: self.valves)
+                for cid, mid, uid, item in list(getattr(conn, "_activity_presentations", {}).values()):
+                    if cid == chat_id and uid == user_id:
+                        await __event_emitter__({"type": "execute", "data": {"code": _render_activity_inline(cid, mid, item)}})
+            except Exception:
+                pass
+            return {"status": "ok"}
         if mode in ("activity", "activity-output"):
             return await self._run_activity(body, __user__, __event_emitter__)
         if mode == "compact":

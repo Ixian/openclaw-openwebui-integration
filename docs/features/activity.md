@@ -27,7 +27,7 @@ The Gateway may report a result as missing, oversized or no longer visible. If t
 
 Opening Activity reads the saved card and recent Gateway history, including an in-flight snapshot when present. The panel refreshes every two seconds while it is open and the tab is visible. Closing the panel stops its polling. Chat ownership and the dialog's session are checked before a read; retained-message references must belong to the displayed tool call.
 
-The panel shows at most 20 recent calls from the last 50 history messages. Live state holds at most 50 calls per run and 128 sessions in memory. It is a view of the Gateway's state, not a second permanent transcript archive. The existing bridge writer persists the activity block with the reply. Presentation text is excluded from model context when a chat is seeded or copied.
+The panel shows at most 20 recent calls from the last 50 history messages. Live state holds at most 50 calls per run and 128 sessions in memory. It is a view of the Gateway's state, not a second permanent transcript archive. The existing bridge writer persists a separate activity record with the reply. A bridge-owned view renders it through the same execute channel as the Status panel. It never enters the assistant answer text or model context. Reopening a chat restores the saved view and the process's latest received snapshot.
 
 A saved card is the last confirmed snapshot, with its update time. A newer run plan can appear before the corresponding saved-card read completes. The two labels preserve that distinction. Open Activity to read the latest saved state after the run ends.
 

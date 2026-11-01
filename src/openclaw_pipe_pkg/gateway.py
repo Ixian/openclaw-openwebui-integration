@@ -1365,6 +1365,7 @@ class _TurnRenderer:
         for item in self.output:
             if activity_terminal and str(item.get("id", "")).startswith("msg_note_activity_"):
                 item["content"] = [{"type": "output_text", "text": self.activity.markdown()}]
+                item["activity"] = self.activity.inline_view()
                 events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
                                "item": copy.deepcopy(item)})
         for event in events:
@@ -1402,7 +1403,7 @@ class _TurnRenderer:
             except (ValueError, TypeError, AttributeError, OverflowError):
                 note = None
             if note:
-                item = {"type": "message", "id": note["id"], "role": "assistant",
+                item = {"type": _ACTIVITY_ITEM, "id": note["id"], "activity": note["activity"],
                         "status": "completed", "content": [{"type": "output_text", "text": note["text"]}]}
                 at = next((n for n, i in enumerate(self.output) if i.get("id") == note["id"]), None)
                 if at is None:
@@ -2769,10 +2770,12 @@ class _GatewayConnection:
             if not hasattr(self, "_activity_runs"):
                 self._activity_runs, self._activity_states = {}, {}
             previous = self._activity_runs.get(session)
-            self._activity_runs[session] = run
-            if previous != run and payload.get("stream") != ACTIVITY_STREAM:
-                self._activity_schedule(session)
             state = self._activity_states.setdefault(session, _ActivityState())
+            terminal = state.run == run and state.status != "running"
+            if not terminal and payload.get("state") not in ("final", "error", "aborted"):
+                self._activity_runs[session] = run
+                if previous != run and payload.get("stream") != ACTIVITY_STREAM:
+                    self._activity_schedule(session)
             try:
                 state.feed(payload)
             except (ValueError, TypeError, AttributeError, OverflowError):

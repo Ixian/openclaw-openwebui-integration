@@ -129,7 +129,9 @@ class _ActivityState:
                                       "markdown": data.get("explanation", "")}, session)
             force = True
         elif stream == "run_status":
-            self.summary = _activity_plain(data.get("message") or phase or "Working")
+            if phase != "retrying" or not data.get("message"):
+                return None
+            self.summary = _activity_plain(data["message"])
         elif stream == "item" and isinstance(data.get("progressText"), str):
             self.summary = _activity_plain(data["progressText"])
         elif stream == "lifecycle" and phase in ("end", "error"):
@@ -187,7 +189,7 @@ class _ActivityState:
             return None
         self._shown, self._last_emit = text, stamp
         tag = hashlib.sha256(f"{session}:{run}".encode()).hexdigest()[:24]
-        return {"id": f"msg_note_activity_{tag}", "text": text}
+        return {"id": f"msg_note_activity_{tag}", "text": text, "activity": self.inline_view()}
 
     def finish(self, status):
         self.status = status
@@ -227,6 +229,9 @@ class _ActivityState:
                 lines.append(fence + "text\n" + preview + "\n" + fence)
                 if call["clipped"]:
                     lines.append("\nPreview limited to the latest 8,000 characters. Open Activity for retained output.")
+        return '<details>\n<summary>' + html.escape(self.label()) + '</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+
+    def label(self):
         current = self.plan or self.card
         steps = (current or {}).get("steps", [])
         done = sum(s["status"] == "completed" for s in steps)
@@ -234,7 +239,12 @@ class _ActivityState:
         if self.calls:
             last = list(self.calls.values())[-1]
             summary += f" · {last['status'].capitalize()}: {last['title']}"
-        return '<details>\n<summary>' + html.escape(summary) + '</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+        return summary
+
+    def inline_view(self):
+        return {"label": self.label(), "card": self.card, "plan": self.plan,
+                "summary": self.summary, "cardError": bool(self.card_error), "status": self.status,
+                "calls": copy.deepcopy(list(self.calls.values())[-8:])}
 
 
 async def _activity_read_card(conn, session):

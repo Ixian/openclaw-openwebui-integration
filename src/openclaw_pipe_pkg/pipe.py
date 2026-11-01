@@ -1563,8 +1563,13 @@ class _PipeTurn:
                             self.images_made += 1
                         if stream == COMPACTION_STREAM:
                             pipe_log(f"  Compaction: phase={phase} completed={data.get('completed')}")
+                        added = []
                         if stream in ("assistant", "item", "tool", PIPE_NOTE_STREAM, COMPACTION_STREAM, *ACTIVITY_STREAMS):
                             added = self.renderer.feed(payload)
+                            for activity_event in added:
+                                if isinstance(activity_event, dict):
+                                    await _activity_emit_inline(self.conn, self.__event_emitter__, activity_event.get("item", {}),
+                                        self.owui_origin_chat_id, self.owui_message_id, self.owui_origin_user_id)
                             for text in (a for a in added if isinstance(a, str)):
                                 async for chunk in self.show_text(text):
                                     yield chunk
@@ -1628,8 +1633,8 @@ class _PipeTurn:
                             note_events = [a for a in added if isinstance(a, dict)]
                             for event in note_events:
                                 yield event
-                            if note_events:
-                                # Only an actual note ends the current text item.
+                            if any(e.get("item", {}).get("type") == "message" for e in note_events):
+                                # A presentation update does not end the text item.
                                 self.fence_item_start = len(self.assistant_stream_text)
 
                         # --- Item events (progress) ---
@@ -2070,6 +2075,8 @@ class _PipeTurn:
             note = ("(interrupted -- the reply continues when the run resumes)"
                     if self.handed_over else TOOL_NO_RESULT_NOTE)
             for event in self.renderer.close_open_calls(note, activity_terminal=not self.handed_over):
+                await _activity_emit_inline(self.conn, self.__event_emitter__, event.get("item", {}),
+                    self.owui_origin_chat_id, self.owui_message_id, self.owui_origin_user_id)
                 pipe_log(f"  closing orphaned tool call {event['item'].get('call_id') or event['item'].get('id')}")
                 yield event
 

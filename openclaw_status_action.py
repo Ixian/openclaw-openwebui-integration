@@ -1197,7 +1197,9 @@ class _ActivityState:
                                       "markdown": data.get("explanation", "")}, session)
             force = True
         elif stream == "run_status":
-            self.summary = _activity_plain(data.get("message") or phase or "Working")
+            if phase != "retrying" or not data.get("message"):
+                return None
+            self.summary = _activity_plain(data["message"])
         elif stream == "item" and isinstance(data.get("progressText"), str):
             self.summary = _activity_plain(data["progressText"])
         elif stream == "lifecycle" and phase in ("end", "error"):
@@ -1255,7 +1257,7 @@ class _ActivityState:
             return None
         self._shown, self._last_emit = text, stamp
         tag = hashlib.sha256(f"{session}:{run}".encode()).hexdigest()[:24]
-        return {"id": f"msg_note_activity_{tag}", "text": text}
+        return {"id": f"msg_note_activity_{tag}", "text": text, "activity": self.inline_view()}
 
     def finish(self, status):
         self.status = status
@@ -1295,6 +1297,9 @@ class _ActivityState:
                 lines.append(fence + "text\n" + preview + "\n" + fence)
                 if call["clipped"]:
                     lines.append("\nPreview limited to the latest 8,000 characters. Open Activity for retained output.")
+        return '<details>\n<summary>' + html.escape(self.label()) + '</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+
+    def label(self):
         current = self.plan or self.card
         steps = (current or {}).get("steps", [])
         done = sum(s["status"] == "completed" for s in steps)
@@ -1302,7 +1307,12 @@ class _ActivityState:
         if self.calls:
             last = list(self.calls.values())[-1]
             summary += f" · {last['status'].capitalize()}: {last['title']}"
-        return '<details>\n<summary>' + html.escape(summary) + '</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+        return summary
+
+    def inline_view(self):
+        return {"label": self.label(), "card": self.card, "plan": self.plan,
+                "summary": self.summary, "cardError": bool(self.card_error), "status": self.status,
+                "calls": copy.deepcopy(list(self.calls.values())[-8:])}
 
 
 async def _activity_read_card(conn, session):
@@ -1409,6 +1419,73 @@ def _activity_result_preview(text):
         return text
     note = "\n\n[Bridge preview clipped. Open Activity for retained output.]"
     return text[:8000 - len(note)] + note
+
+
+# --- activity_inline -------------------------------------------------------
+_ACTIVITY_ITEM = "openclaw:activity"
+_ACTIVITY_INLINE_JS = r"""
+(function(){
+ const KEY='__openclawActivity';
+ if(typeof requestAnimationFrame!=='function'||typeof MutationObserver!=='function'||!document.body)return;
+ if(window[KEY]) return;
+ const G={items:new Map(),queued:false,lastChat:null,restored:false,contexts:{}};window[KEY]=G;
+ const current=()=>{const m=location.pathname.match(/^\/c\/([^/]+)/);return m?decodeURIComponent(m[1]):null;};
+ const add=(p,t,text)=>{const e=document.createElement(t);e.textContent=text||'';p.append(e);return e;};
+ function mount(){
+  G.queued=false;const chat=current();
+  if(chat!==G.lastChat){G.lastChat=chat;G.restored=false;}
+  for(const D of G.items.values()){
+   if(D.chatId!==chat) continue;
+   const message=document.getElementById('message-'+D.messageId);
+   const parent=message&&message.querySelector('.chat-assistant');if(!parent) continue;
+   const id='openclaw-activity-'+D.activityId;
+   let root=document.getElementById(id);
+   if(root&&root.dataset.serial===D.serial) continue;
+   if(!root){root=document.createElement('details');root.id=id;root.dataset.openclawActivity='1';root.open=true;parent.prepend(root);}
+   root.dataset.serial=D.serial;
+   Object.assign(root.style,{fontSize:'13px',lineHeight:'1.5',margin:'8px 0',padding:'10px 12px',border:'1px solid #9ca3af',borderRadius:'10px',overflowWrap:'anywhere'});
+   root.replaceChildren();const V=D.activity;
+   add(root,'summary',V.label).style.cursor='pointer';
+   for(const [label,card] of [['Run plan',V.plan],['Task progress',V.card]]){
+    if(!card)continue;
+    add(root,'strong',label).style.display='block';
+    for(const step of card.steps||[])add(root,'div',(step.status==='completed'?'✓ ':step.status==='in_progress'?'● ':'○ ')+step.step);
+    if(card.markdown){const n=add(root,'div',card.markdown);n.style.whiteSpace='pre-wrap';}
+    if(card.updatedAt)add(root,'small','Last update: '+new Date(card.updatedAt).toLocaleString());
+   }
+   if(V.cardError)add(root,'div','Progress refresh failed; showing the last confirmed snapshot.');
+   if(V.summary)add(root,'div',V.summary);
+   for(const call of V.calls||[]){
+    add(root,'div',call.status[0].toUpperCase()+call.status.slice(1)+' · '+call.title).style.fontWeight='600';
+    if(call.output&&['running','failed','interrupted'].includes(call.status)){
+     const pre=add(root,'pre',call.output);Object.assign(pre.style,{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'220px',overflow:'auto',fontSize:'12px'});
+     if(call.clipped)add(root,'small','Preview limited to the latest 8,000 characters. Open Status for retained output.');
+    }
+   }
+   if(V.status!=='running')add(root,'small','Response ended; unfinished task steps remain unfinished.');
+  }
+  const C=G.contexts[chat];
+  const users=document.querySelectorAll('.chat-user');
+  const target=users.length&&users[users.length-1].closest('[id^="message-"]');
+  if(chat&&!G.restored&&C&&C.model&&target){
+   G.restored=true;
+   fetch('/api/chat/actions/openclaw_status_action',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('token')},
+    body:JSON.stringify({mode:'activity-restore',chat_id:chat,id:target.id.slice(8),model:C.model,session_id:C.sessionId||'openclaw-composer'})}).catch(()=>{});
+  }
+ }
+ const schedule=()=>{if(!G.queued){G.queued=true;requestAnimationFrame(mount);}};
+ G.configure=C=>{if(C.chatId&&C.model)G.contexts[C.chatId]=C;schedule();};
+ G.receive=D=>{G.items.set(D.activityId,D);while(G.items.size>30)G.items.delete(G.items.keys().next().value);schedule();};
+ G.observer=new MutationObserver(schedule);G.observer.observe(document.body,{childList:true,subtree:true});schedule();
+})();
+"""
+
+
+def _render_activity_inline(chat_id, message_id, item):
+    data = {"chatId": chat_id, "messageId": message_id, "activityId": item["id"],
+            "activity": item["activity"]}
+    data["serial"] = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:20]
+    return _ACTIVITY_INLINE_JS + "\nwindow.__openclawActivity.receive(" + json.dumps(data).replace("<", "\\u003c") + ");"
 
 
 # --- gateway ---------------------------------------------------------------
@@ -2774,6 +2851,7 @@ class _TurnRenderer:
         for item in self.output:
             if activity_terminal and str(item.get("id", "")).startswith("msg_note_activity_"):
                 item["content"] = [{"type": "output_text", "text": self.activity.markdown()}]
+                item["activity"] = self.activity.inline_view()
                 events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
                                "item": copy.deepcopy(item)})
         for event in events:
@@ -2811,7 +2889,7 @@ class _TurnRenderer:
             except (ValueError, TypeError, AttributeError, OverflowError):
                 note = None
             if note:
-                item = {"type": "message", "id": note["id"], "role": "assistant",
+                item = {"type": _ACTIVITY_ITEM, "id": note["id"], "activity": note["activity"],
                         "status": "completed", "content": [{"type": "output_text", "text": note["text"]}]}
                 at = next((n for n, i in enumerate(self.output) if i.get("id") == note["id"]), None)
                 if at is None:
@@ -4178,10 +4256,12 @@ class _GatewayConnection:
             if not hasattr(self, "_activity_runs"):
                 self._activity_runs, self._activity_states = {}, {}
             previous = self._activity_runs.get(session)
-            self._activity_runs[session] = run
-            if previous != run and payload.get("stream") != ACTIVITY_STREAM:
-                self._activity_schedule(session)
             state = self._activity_states.setdefault(session, _ActivityState())
+            terminal = state.run == run and state.status != "running"
+            if not terminal and payload.get("state") not in ("final", "error", "aborted"):
+                self._activity_runs[session] = run
+                if previous != run and payload.get("stream") != ACTIVITY_STREAM:
+                    self._activity_schedule(session)
             try:
                 state.feed(payload)
             except (ValueError, TypeError, AttributeError, OverflowError):
@@ -6841,7 +6921,9 @@ def _render_composer_button_js(*, session_id=None, model_prefixes=None, chat_id=
         "thinkingChipLabel": _COMPOSER_THINKING_CHIP_LABEL,
     }
     payload = json.dumps(config).replace("<", "\\u003c")
-    return _COMPOSER_BUTTON_JS_TEMPLATE.replace("__OPENCLAW_COMPOSER_CONFIG__", payload)
+    return (_COMPOSER_BUTTON_JS_TEMPLATE.replace("__OPENCLAW_COMPOSER_CONFIG__", payload) + "\n" + _ACTIVITY_INLINE_JS
+            + "\nwindow.__openclawActivity?.configure(" + json.dumps({"chatId": chat_id, "model": chat_model,
+                           "sessionId": session_id}).replace("<", "\\u003c") + ");")
 
 
 async def _emit_composer_button(__event_emitter__, *, session_id=None, model_id=None,
@@ -9847,6 +9929,23 @@ class Action:
         __event_emitter__ = _dialog_safe_emitter(
             __event_emitter__, (__user__ or {}).get("id"), body.get("chat_id"), body.get("id"))
         mode = body.get("mode")
+        if mode == "activity-restore":
+            chat_id, user_id = body.get("chat_id"), (__user__ or {}).get("id")
+            chat = await _load_owui_recent(chat_id, user_id) if chat_id and user_id else None
+            if chat is None:
+                return {"status": "error"}
+            for message in ((chat.get("history") or {}).get("messages") or {}).values():
+                for item in message.get("output") or []:
+                    if item.get("type") == _ACTIVITY_ITEM and isinstance(item.get("activity"), dict):
+                        await __event_emitter__({"type": "execute", "data": {"code": _render_activity_inline(chat_id, message["id"], item)}})
+            try:
+                conn, _ = await _get_action_connection(lambda: self.valves)
+                for cid, mid, uid, item in list(getattr(conn, "_activity_presentations", {}).values()):
+                    if cid == chat_id and uid == user_id:
+                        await __event_emitter__({"type": "execute", "data": {"code": _render_activity_inline(cid, mid, item)}})
+            except Exception:
+                pass
+            return {"status": "ok"}
         if mode in ("activity", "activity-output"):
             return await self._run_activity(body, __user__, __event_emitter__)
         if mode == "compact":

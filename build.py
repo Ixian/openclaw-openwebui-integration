@@ -68,7 +68,7 @@ PIPE = Artifact(
     frontmatter=ROOT / "src" / "frontmatter.txt",
     out=ROOT / "openclaw_pipe.py",
     module_order=("_prelude", "identity", "state", "turns", "thinking", "media", "emit",
-                  "composer", "composer_watch", "askuser", "approvals", "history_lookup", "activity", "gateway", "writer", "models",
+                  "composer", "composer_watch", "askuser", "approvals", "history_lookup", "activity", "activity_inline", "gateway", "writer", "models",
                   "history", "slash_prompts", "channels", "pipe"),
 )
 
@@ -81,7 +81,7 @@ PIPE = Artifact(
 ACTION = Artifact(
     frontmatter=ROOT / "src" / "frontmatter-action.txt",
     out=ROOT / "openclaw_status_action.py",
-    module_order=("_prelude", "identity", "state", "turns", "thinking", "history_lookup", "activity", "gateway",
+    module_order=("_prelude", "identity", "state", "turns", "thinking", "history_lookup", "activity", "activity_inline", "gateway",
                   "emit", "composer", "activity_view", "action"),
 )
 # "composer" is in both: the Action and the Pipe each deliver the composer

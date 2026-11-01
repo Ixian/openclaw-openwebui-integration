@@ -774,6 +774,8 @@ class _TurnWriter:
         async with self._emit_lock:
             for ev in _relay_output_events(self.sent_output, output):
                 await emit({"type": "response:completion", "data": ev})
+            for item in output:
+                await _activity_emit_inline(self.conn, emit, item, self.chat_id, self.message_id, self.user_id)
             self.sent_output = copy.deepcopy(output)
             self.sent_text = text
         await _save_response_stream(self.task_id, self.chat_id, self.message_id, text, self.sent_output)
@@ -2994,3 +2996,33 @@ class _TurnHooks:
 
 
 _TURNS = _TurnHooks
+
+
+async def _activity_emit_inline(conn, emitter, item, chat_id, message_id, user_id):
+    if item.get("type") != _ACTIVITY_ITEM or not emitter or not chat_id or not message_id:
+        return
+    if not hasattr(conn, "_activity_presentations"):
+        conn._activity_presentations = {}
+    conn._activity_presentations[item["id"]] = (chat_id, message_id, user_id, copy.deepcopy(item))
+    while len(conn._activity_presentations) > 128:
+        conn._activity_presentations.pop(next(iter(conn._activity_presentations)))
+    try:
+        if not hasattr(conn, "_activity_safe_targets"):
+            conn._activity_safe_targets = {}
+        key = (chat_id, message_id)
+        target = conn._activity_safe_targets.get(key)
+        if target is None:
+            head = await _ComposerWatcher._chat_head(chat_id)
+            if not head or head["user_id"] != user_id or head["message_id"] == message_id:
+                return
+            target = head["message_id"]
+            conn._activity_safe_targets[key] = target
+            if len(conn._activity_safe_targets) > 128:
+                conn._activity_safe_targets.pop(next(iter(conn._activity_safe_targets)))
+        async def send(event):
+            return await _relay_emit_event(user_id, chat_id, target, event)
+        safe = _dialog_safe_emitter(send, user_id, chat_id, target)
+        await safe({"type": "execute", "data": {"code": _render_activity_inline(chat_id, message_id, item)}})
+    except Exception:
+        pass
+
