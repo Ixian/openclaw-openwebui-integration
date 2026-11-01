@@ -10,7 +10,7 @@ Applies to: Pipe and Status Action, installed together from the same Marvin rele
 
 Task progress is the session's saved progress card, read through `progressCard.get`. Run plan is a plan event from the current run. They are separate because a run can end with unfinished task steps. Ending a response never marks pending steps complete.
 
-A running command shows a rolling preview of the latest 8,000 characters. The preview is replaced with each snapshot; repeated snapshots do not append duplicate output. Native tool cards still show the final result. Failed, interrupted and completed calls have separate states.
+A running command shows a rolling preview of the latest 8,000 characters. The preview is replaced with each snapshot; repeated snapshots do not append duplicate output. Native tool cards still show the final result. Failed, interrupted and completed calls have separate states. A command that returns a background-process receipt is labelled Background; its ongoing process belongs to the existing Background section. A launch receipt is not treated as command success.
 
 Titles use the tool's supplied title or description, or a file path for file tools. Untitled shell calls use “Run command.” The bridge does not ask a model to invent a description or require an agent to narrate every call.
 

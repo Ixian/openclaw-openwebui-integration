@@ -25,7 +25,7 @@
           "say": "Reading the command output as it arrives.",
           "tool": "exec",
           "args": {
-            "command": "python3 -u -c 'import time; print(\"ACTIVITY_FIRST_LINE\",flush=True); [(print(\"sample-%d \"%i+\"x\"*450,flush=True),time.sleep(.35)) for i in range(30)]; print(\"ACTIVITY_RETAINED_END\",flush=True)'",
+            "command": "python3 -u -c 'import time; print(\"ACTIVITY_FIRST_LINE\",flush=True); [(print(\"sample-%d \"%i+\"x\"*450,flush=True),time.sleep(.2)) for i in range(30)]; print(\"ACTIVITY_RETAINED_END\",flush=True)'",
             "title": "Inspect Gateway diagnostic output",
             "yieldMs": 10000
           }

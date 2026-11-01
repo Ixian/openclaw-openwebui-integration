@@ -1235,8 +1235,12 @@ class _ActivityState:
                 result = raw if isinstance(raw, dict) else {}
                 details = result.get("details") or {}
                 exit_code = data.get("exitCode", result.get("exitCode", details.get("exitCode")))
-                call["status"] = ("failed" if data.get("isError") or exit_code not in (None, 0)
+                exec_status = details.get("status")
+                call["status"] = ("failed" if data.get("isError") or result.get("isError")
+                                  or exit_code not in (None, 0) or exec_status in ("failed", "approval-unavailable")
                                   or data.get("status") == "failed" else
+                                  "background" if exec_status == "running" and details.get("sessionId") else
+                                  "awaiting approval" if exec_status == "approval-pending" else
                                   "cancelled" if data.get("status") == "cancelled" else "completed")
                 force = True
             elif phase == "start":
@@ -1350,6 +1354,14 @@ async def _activity_snapshot(conn, session):
         for event in _history_events([message]):
             if event.get("stream") != "tool":
                 continue
+            if event.get("data", {}).get("phase") == "result":
+                tid = event["data"].get("toolCallId")
+                source = message if message.get("toolCallId") == tid else next((
+                    block for block in message.get("content", []) if isinstance(block, dict)
+                    and (block.get("toolCallId") or block.get("tool_use_id")) == tid), {})
+                if isinstance(source.get("details"), dict):
+                    event = {**event, "data": {**event["data"], "result": {
+                        "text": _activity_output(event["data"].get("result")), "details": source["details"]}}}
             historical.feed({**event, "sessionKey": session, "runId": run})
             recent_calls.update(copy.deepcopy(historical.calls))
         if message.get("role") == "toolResult" and message.get("toolCallId") and meta.get("id"):

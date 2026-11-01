@@ -314,6 +314,12 @@
       },
       "manual": true
     },
+    "marvin-activity-light.png": {
+      "sha": "956830ea2ff78d27",
+      "groups": {
+        "chrome": "7fafc5d6eb2e2997"
+      }
+    },
     "media-turn-light.png": {
       "sha": "ad31cb44efa5ae1a",
       "groups": {

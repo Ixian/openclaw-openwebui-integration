@@ -237,3 +237,20 @@ class ActivitySnapshotRaceTests(unittest.IsolatedAsyncioTestCase):
                 return {'messages': []}
         result = await p._activity_snapshot(Conn(), SESSION)
         self.assertIsNone(result['card'])
+
+
+class BackgroundReceiptTests(unittest.TestCase):
+    def test_a_background_receipt_is_not_a_successful_command(self):
+        state = p._ActivityState()
+        state.feed(event())
+        state.feed(event(seq=2, phase='result', result={'text':'still running',
+                        'details':{'status':'running','sessionId':'process1'}}))
+        state.feed(event(seq=3, stream='command_output', phase='end', status='completed'))
+        state.finish('ended')
+        self.assertEqual(state.calls['call1']['status'], 'background')
+
+    def test_an_approval_receipt_does_not_claim_success(self):
+        state = p._ActivityState()
+        state.feed(event())
+        state.feed(event(seq=2, phase='result', result={'details':{'status':'approval-pending'}}))
+        self.assertEqual(state.calls['call1']['status'], 'awaiting approval')
