@@ -254,3 +254,50 @@ class BackgroundReceiptTests(unittest.TestCase):
         state.feed(event())
         state.feed(event(seq=2, phase='result', result={'details':{'status':'approval-pending'}}))
         self.assertEqual(state.calls['call1']['status'], 'awaiting approval')
+
+
+class ActivityTransportTests(unittest.TestCase):
+    def test_progress_updates_cannot_replace_or_enter_the_answer(self):
+        from test_pipe_unit import _owui_stream
+        renderer = p._TurnRenderer()
+        chunks = []
+        for payload in [event(), event(stream='assistant', seq=2, delta='Hello '),
+                        event(seq=3, phase='update', partialResult={'text':'command output'}),
+                        event(stream='assistant', seq=4, delta='world.'),
+                        event(seq=5, phase='result', result={'text':'final output'})]:
+            chunks.extend(renderer.feed(payload))
+        content, output, _ = _owui_stream(chunks)
+        answer = ''.join(i['content'][0]['text'] for i in output if i['type'] == 'message')
+        self.assertEqual(content, 'Hello world.')
+        self.assertEqual(answer, 'Hello world.')
+        self.assertTrue(any(i['type'] == p._ACTIVITY_ITEM for i in output))
+        self.assertNotIn('command output', answer)
+
+    def test_model_startup_is_not_a_task_or_an_answer(self):
+        renderer = p._TurnRenderer()
+        self.assertEqual(renderer.feed(event(stream='run_status', phase='starting_model')), [])
+        self.assertEqual(renderer.output, [])
+
+
+class ActivitySocketTests(unittest.IsolatedAsyncioTestCase):
+    async def test_presentation_executes_under_a_user_message(self):
+        import types
+        state = p._TurnRenderer()
+        state.feed(event())
+        item = next(i for i in state.output if i['type'] == p._ACTIVITY_ITEM)
+        conn = types.SimpleNamespace()
+        with mock.patch.object(p._ComposerWatcher, '_chat_head', new=mock.AsyncMock(return_value={
+                'user_id':'owner','message_id':'user-message'})), \
+             mock.patch.object(p, '_relay_emit_event', new=mock.AsyncMock()) as relay:
+            await p._activity_emit_inline(conn, mock.AsyncMock(), item, 'chat', 'assistant-message', 'owner')
+        self.assertEqual(relay.await_args.args[:3], ('owner','chat','user-message'))
+        self.assertEqual(relay.await_args.args[3]['type'], 'execute')
+
+    async def test_final_chat_event_does_not_reopen_progress_tracking(self):
+        import types
+        conn = p._GatewayConnection(lambda: types.SimpleNamespace(AGENT_ID='marvin'))
+        with mock.patch.object(p, '_TURNS', None):
+            for payload in [event(stream='lifecycle', phase='start'), event(stream='lifecycle', phase='end',seq=2),
+                            {'sessionKey':SESSION,'runId':'run1','state':'final'}]:
+                await conn._dispatch_run_event({'type':'event','event':'agent','payload':payload})
+        self.assertNotIn(SESSION, conn._activity_runs)
