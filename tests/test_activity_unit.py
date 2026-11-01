@@ -95,7 +95,7 @@ class ActivityStateTests(unittest.TestCase):
         p._keep_pipe_notes(r.output, rebuilt)
         p._keep_pipe_notes(r.output, rebuilt)
         self.assertEqual(len(rebuilt.output), 1)
-        self.assertIn("Interrupted", str(rebuilt.output))
+        self.assertEqual(rebuilt.output[0]["activity"]["calls"][0]["status"], "interrupted")
 
     def test_bounds_and_no_shell_arguments_in_title(self):
         state = p._ActivityState()
@@ -270,7 +270,9 @@ class ActivityTransportTests(unittest.TestCase):
         answer = ''.join(i['content'][0]['text'] for i in output if i['type'] == 'message')
         self.assertEqual(content, 'Hello world.')
         self.assertEqual(answer, 'Hello world.')
-        self.assertTrue(any(i['type'] == p._ACTIVITY_ITEM for i in output))
+        activity = [i for i in output if i['type'] == p._ACTIVITY_ITEM]
+        self.assertTrue(activity)
+        self.assertTrue(all(not i.get('content') for i in activity), 'unknown content has a frontend text fallback')
         self.assertNotIn('command output', answer)
 
     def test_model_startup_is_not_a_task_or_an_answer(self):

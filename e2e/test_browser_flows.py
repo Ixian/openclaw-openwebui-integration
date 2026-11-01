@@ -2141,7 +2141,6 @@ def test_marvin_activity_stream_reload_and_retained_output(page):
     """Real Gateway snapshots, output controls and chat reload stay session scoped."""
     capture.new_chat(page)
     capture.send(page, "E2E_MARVIN_ACTIVITY")
-    live = page.locator('.chat-assistant').last
     activity = page.locator('[data-openclaw-activity="1"]')
     activity.locator('summary').wait_for(timeout=TURN_MS)
     page.get_by_text('ACTIVITY_FIRST_LINE', exact=False).wait_for(timeout=TURN_MS)

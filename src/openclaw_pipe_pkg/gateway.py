@@ -1364,7 +1364,6 @@ class _TurnRenderer:
             self.activity.finish("interrupted")
         for item in self.output:
             if activity_terminal and str(item.get("id", "")).startswith("msg_note_activity_"):
-                item["content"] = [{"type": "output_text", "text": self.activity.markdown()}]
                 item["activity"] = self.activity.inline_view()
                 events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
                                "item": copy.deepcopy(item)})
@@ -1404,7 +1403,7 @@ class _TurnRenderer:
                 note = None
             if note:
                 item = {"type": _ACTIVITY_ITEM, "id": note["id"], "activity": note["activity"],
-                        "status": "completed", "content": [{"type": "output_text", "text": note["text"]}]}
+                        "status": "completed"}
                 at = next((n for n, i in enumerate(self.output) if i.get("id") == note["id"]), None)
                 if at is None:
                     self.output.append(item)
