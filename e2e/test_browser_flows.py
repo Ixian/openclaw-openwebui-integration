@@ -2141,16 +2141,16 @@ def test_marvin_activity_stream_reload_and_retained_output(page):
     """Real Gateway snapshots, output controls and chat reload stay session scoped."""
     capture.new_chat(page)
     capture.send(page, "E2E_MARVIN_ACTIVITY")
-    live = page.locator('details').filter(has=page.get_by_text('Task activity', exact=True))
-    page.get_by_text('Task activity', exact=True).wait_for(timeout=TURN_MS)
-    page.get_by_text('Task activity', exact=True).click()
+    live = page.locator('details').filter(has=page.get_by_text(re.compile(r'^Task activity')))
+    page.get_by_text(re.compile(r'^Task activity')).wait_for(timeout=TURN_MS)
+    page.get_by_text(re.compile(r'^Task activity')).click()
     page.get_by_text('ACTIVITY_FIRST_LINE', exact=False).wait_for(timeout=TURN_MS)
     assert live.count() == 1
     assert live.get_by_text('1/2 steps complete', exact=False).count() == 1
     page.reload()
     page.wait_for_function("() => document.body.innerText.includes('ACTIVITY_DONE')", timeout=TURN_MS)
-    assert page.get_by_text('Task activity', exact=True).count() == 1
-    page.get_by_text('Task activity', exact=True).click()
+    assert page.get_by_text(re.compile(r'^Task activity')).count() == 1
+    page.get_by_text(re.compile(r'^Task activity')).click()
     _open_status(page)
     section = page.locator('#openclaw-status-section-activity')
     section.get_by_text('2/2 complete', exact=False).wait_for(timeout=30_000)

@@ -20,18 +20,20 @@ _ACTIVITY_VIEW_JS = r"""
   add(section,'h3','Activity').style.fontWeight = '600';
   add(section,'small','Bridge ' + D.release);
   if (D.error) add(section,'p',D.error).setAttribute('role','status');
-  const card = D.card || D.plan;
+  for (const [label,card] of [["Run plan",D.plan],["Task progress",D.card]]) {
   if (card) {
     const steps = card.steps || [];
     const done = steps.filter(s => s.status === 'completed').length;
-    add(section,'h4',(D.card ? 'Task progress' : 'Run plan') + (steps.length ? ' · '+done+'/'+steps.length+' complete' : ''));
+    add(section,'h4',label + (steps.length ? ' · '+done+'/'+steps.length+' complete' : ''));
     for (const step of steps) {
       add(section,'p',(step.status === 'completed' ? '✓ ' : step.status === 'in_progress' ? '● ' : '○ ') + step.step);
     }
     if (card.markdown) { const note=add(section,'p',card.markdown); note.style.whiteSpace='pre-wrap'; }
     if (card.updatedAt) add(section,'small','Last update: '+new Date(card.updatedAt).toLocaleString());
     if (D.status !== 'running' && done < steps.length) add(section,'p','Work remains unfinished.');
-  } else add(section,'p','No saved task progress.');
+  }
+  }
+  if(!D.card && !D.plan) add(section,'p','No saved task progress.');
   if (D.cardError) add(section,'p','Progress could not be refreshed.');
   if (D.historyError) add(section,'p','History is unavailable; showing received activity.');
   if (D.historyLimited) add(section,'small','Showing recent activity; older calls are outside this view.');

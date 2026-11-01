@@ -1259,11 +1259,11 @@ class _ActivityState:
 
     def markdown(self):
         lines = ["### Activity"]
-        card = self.card or self.plan
-        if card:
+        for label, card in (("Run plan", self.plan), ("Task progress", self.card)):
+            if not card:
+                continue
             steps = card.get("steps") or []
             done = sum(s["status"] == "completed" for s in steps)
-            label = "Task progress" if self.card else "Run plan"
             lines.append(f"**{label}" + (f" · {done}/{len(steps)} steps complete**" if steps else "**"))
             for step in steps:
                 marker = "x" if step["status"] == "completed" else " "
@@ -1274,7 +1274,7 @@ class _ActivityState:
             if isinstance(card.get("updatedAt"), (int, float)):
                 updated = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(card["updatedAt"] / 1000))
                 lines.append(f"\nLast progress update: {updated}")
-            if self.status != "running" and done < len(steps):
+            if self.status != "running" and done < len(steps) and (label == "Run plan" or not self.plan):
                 lines.append("\nWork remains unfinished. The response ending does not complete the plan.")
         if self.card_error:
             lines.append("\nProgress could not be refreshed; showing the last confirmed snapshot.")
@@ -1289,7 +1289,14 @@ class _ActivityState:
                 lines.append(fence + "text\n" + preview + "\n" + fence)
                 if call["clipped"]:
                     lines.append("\nPreview limited to the latest 8,000 characters. Open Activity for retained output.")
-        return '<details>\n<summary>Task activity</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+        current = self.plan or self.card
+        steps = (current or {}).get("steps", [])
+        done = sum(s["status"] == "completed" for s in steps)
+        summary = "Task activity" + (f" · {done}/{len(steps)}" if steps else "")
+        if self.calls:
+            last = list(self.calls.values())[-1]
+            summary += f" · {last['status'].capitalize()}: {last['title']}"
+        return '<details>\n<summary>' + html.escape(summary) + '</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
 
 
 async def _activity_read_card(conn, session):
@@ -6857,18 +6864,20 @@ _ACTIVITY_VIEW_JS = r"""
   add(section,'h3','Activity').style.fontWeight = '600';
   add(section,'small','Bridge ' + D.release);
   if (D.error) add(section,'p',D.error).setAttribute('role','status');
-  const card = D.card || D.plan;
+  for (const [label,card] of [["Run plan",D.plan],["Task progress",D.card]]) {
   if (card) {
     const steps = card.steps || [];
     const done = steps.filter(s => s.status === 'completed').length;
-    add(section,'h4',(D.card ? 'Task progress' : 'Run plan') + (steps.length ? ' · '+done+'/'+steps.length+' complete' : ''));
+    add(section,'h4',label + (steps.length ? ' · '+done+'/'+steps.length+' complete' : ''));
     for (const step of steps) {
       add(section,'p',(step.status === 'completed' ? '✓ ' : step.status === 'in_progress' ? '● ' : '○ ') + step.step);
     }
     if (card.markdown) { const note=add(section,'p',card.markdown); note.style.whiteSpace='pre-wrap'; }
     if (card.updatedAt) add(section,'small','Last update: '+new Date(card.updatedAt).toLocaleString());
     if (D.status !== 'running' && done < steps.length) add(section,'p','Work remains unfinished.');
-  } else add(section,'p','No saved task progress.');
+  }
+  }
+  if(!D.card && !D.plan) add(section,'p','No saved task progress.');
   if (D.cardError) add(section,'p','Progress could not be refreshed.');
   if (D.historyError) add(section,'p','History is unavailable; showing received activity.');
   if (D.historyLimited) add(section,'small','Showing recent activity; older calls are outside this view.');
