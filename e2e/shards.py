@@ -34,6 +34,7 @@ BROWSER = "test_browser_flows.py"
 SHARDS = {
     # Install, plain replies, wakes, owner rights, and the first two crashes.
     "1": [
+        f"{BROWSER}::test_marvin_activity_stream_reload_and_retained_output",
         f"{E2E}::test_all_three_functions_installed_and_active",
         f"{E2E}::test_function_metadata_parsed",
         f"{E2E}::test_models_listed",
