@@ -81,6 +81,7 @@ class _ActivityState:
         self.sequences = {}
         self.card = None
         self.card_error = None
+        self.card_epoch = 0
         self.plan = None
         self.status = "running"
         self.summary = ""
@@ -119,6 +120,7 @@ class _ActivityState:
                 if card and self.card and card["revision"] < self.card["revision"]:
                     return None
                 self.card = card
+                self.card_epoch += 1
             self.card_error = data.get("error")
             force = True
         elif stream == "plan":
@@ -259,6 +261,8 @@ async def _activity_load_output(conn, session, message_id, call_id):
 
 async def _activity_snapshot(conn, session):
     """Read current state, then merge bounded history without regressing live calls."""
+    before = getattr(conn, "_activity_states", {}).get(session)
+    before_epoch = before.card_epoch if before else 0
     card_result, history_result = await asyncio.gather(
         _activity_read_card(conn, session),
         conn.send_request("chat.history", {"sessionKey": session, "limit": 50,
@@ -305,7 +309,7 @@ async def _activity_snapshot(conn, session):
         state.finish("ended")
     if isinstance(card_result, BaseException):
         state.card_error = "Progress read failed"
-    else:
+    elif not live or state.card_epoch == before_epoch:
         state.card = _activity_card(card_result, session)
     calls = []
     for old in recent_calls.values():

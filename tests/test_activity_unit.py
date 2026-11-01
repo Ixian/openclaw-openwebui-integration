@@ -205,3 +205,35 @@ class ActivityColumnTests(unittest.TestCase):
         self.assertIn('Task progress', state.markdown())
         self.assertIn('Run plan', state.markdown())
         self.assertEqual(state.card['steps'][0]['status'], 'in_progress')
+
+
+class ActivitySnapshotRaceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_read_started_before_a_live_revision_cannot_regress_it(self):
+        state = p._ActivityState()
+        state.feed(event(stream=p.ACTIVITY_STREAM, card=card(1)))
+
+        class Conn:
+            _activity_states = {SESSION: state}
+
+            async def send_request(self, method, params, timeout):
+                if method == 'progressCard.get':
+                    return {'card': card(1)}
+                state.feed(event(seq=2, stream=p.ACTIVITY_STREAM, card=card(2)))
+                return {'messages': []}
+        result = await p._activity_snapshot(Conn(), SESSION)
+        self.assertEqual(result['card']['revision'], 2)
+
+    async def test_read_started_before_a_live_clear_cannot_restore_old_progress(self):
+        state = p._ActivityState()
+        state.feed(event(stream=p.ACTIVITY_STREAM, card=card(1)))
+
+        class Conn:
+            _activity_states = {SESSION: state}
+
+            async def send_request(self, method, params, timeout):
+                if method == 'progressCard.get':
+                    return {'card': card(1)}
+                state.feed(event(seq=2, stream=p.ACTIVITY_STREAM, card=None))
+                return {'messages': []}
+        result = await p._activity_snapshot(Conn(), SESSION)
+        self.assertIsNone(result['card'])

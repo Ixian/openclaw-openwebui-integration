@@ -11,7 +11,7 @@ _ACTIVITY_VIEW_JS = r"""
     section.id = 'openclaw-status-section-activity';
     document.getElementById('openclaw-status-sections').prepend(section);
   }
-  Object.assign(section.style,{fontSize:'13px',lineHeight:'1.5',marginBottom:'16px',paddingBottom:'12px'});
+  Object.assign(section.style,{fontSize:'13px',lineHeight:'1.5',overflowWrap:'anywhere',marginBottom:'16px',paddingBottom:'12px'});
   const opened = new Set([...section.querySelectorAll('details[open]')].map(e => e.dataset.call));
   const focused = document.activeElement && document.activeElement.dataset.activityFocus;
   section.replaceChildren();
