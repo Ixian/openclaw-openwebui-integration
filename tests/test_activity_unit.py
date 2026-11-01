@@ -62,7 +62,7 @@ class ActivityStateTests(unittest.TestCase):
         state.feed(event("update", seq=2, partialResult={"text": "</details><script>bad()</script>"}), now=2)
         text = state.markdown()
         self.assertEqual(text.count("</details>"), 1)
-        self.assertNotIn("<script>", text)
+        self.assertIn("&lt;/details", text)
         seed = p._history_seed([{"role": "assistant", "content": text + "\nActual answer"}])
         self.assertIn("Actual answer", seed)
         self.assertNotIn("bad()", seed)

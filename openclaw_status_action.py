@@ -1283,11 +1283,13 @@ class _ActivityState:
         for call in list(self.calls.values())[-8:]:
             lines.append(f"\n**{call['status'].capitalize()} · {_activity_escape(call['title'])}**")
             if call["output"] and call["status"] in ("running", "interrupted", "failed"):
-                # Indented code is inert even when command output contains fences or HTML.
-                lines.append("<pre>" + html.escape(call["output"]) + "</pre>")
+                # A longer fence keeps arbitrary command output inside the code block.
+                fence = "`" * max(3, 1 + max((len(m.group()) for m in re.finditer(r"`+", call["output"])), default=0))
+                preview = re.sub(r"</details", "&lt;/details", call["output"], flags=re.I)
+                lines.append(fence + "text\n" + preview + "\n" + fence)
                 if call["clipped"]:
                     lines.append("\nPreview limited to the latest 8,000 characters. Open Activity for retained output.")
-        return '<details open data-openclaw-activity="1"><summary>Task activity</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+        return '<details>\n<summary>Task activity</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
 
 
 async def _activity_read_card(conn, session):

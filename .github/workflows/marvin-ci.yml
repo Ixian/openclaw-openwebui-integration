@@ -19,8 +19,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: python3 build.py --check-all
       - run: uvx ruff@0.17.0 check .
-      - run: uv run --with-requirements requirements-dev.txt --with websockets==17.3 pytest -q
-      - run: uv run --with-requirements requirements-dev.txt --with websockets==17.3 python scripts/check_artifacts_load.py
+      - run: uv run --with-requirements requirements-dev.txt pytest -q
+      - run: uv run --with-requirements requirements-dev.txt python scripts/check_artifacts_load.py
   browser:
     needs: unit
     runs-on: ubuntu-latest
