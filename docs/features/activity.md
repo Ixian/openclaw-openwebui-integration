@@ -4,6 +4,8 @@ The Marvin bridge adds a Task activity block to tool-using replies. Its summary 
 
 Applies to: Pipe and Status Action, installed together from the same Marvin release.
 
+<img src="../img/marvin-activity-light.png" alt="Task progress and a command preview in the Activity panel" width="320">
+
 ## What the display means
 
 Task progress is the session's saved progress card, read through `progressCard.get`. Run plan is a plan event from the current run. They are separate because a run can end with unfinished task steps. Ending a response never marks pending steps complete.
