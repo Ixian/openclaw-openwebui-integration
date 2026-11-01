@@ -559,6 +559,18 @@ class Scenes:
         self.background_chat: str | None = None
         self.long_chat: str | None = None
 
+    def marvin_activity(self, page: Page) -> None:
+        new_chat(page)
+        send(page, "E2E_MARVIN_ACTIVITY")
+        wait_js(page, "() => document.body.innerText.includes('ACTIVITY_DONE')", "the diagnostic finishing")
+        page.locator('button[aria-label="OpenClaw status"]').click()
+        section = page.locator('#openclaw-status-section-activity')
+        section.get_by_text('2/2 complete', exact=False).wait_for(timeout=30_000)
+        for detail in section.locator('details').all():
+            if 'Inspect Gateway' in detail.inner_text():
+                detail.locator('summary').click()
+        self.s.shot(page, "marvin-activity", selector='#openclaw-status-modal-root')
+
     def hero(self, page: Page) -> None:
         """#1 hero-tool-cards mid-run, then #5 tool-card-expanded once done."""
         new_chat(page)
@@ -1407,6 +1419,7 @@ def main(argv=None) -> int:
         browser = pw.chromium.launch()
         try:
             page = signed_in_page(browser, token, PHONE)
+            shooter.run("marvin-activity", scenes.marvin_activity, page)
             shooter.run("hero-tool-cards", scenes.hero, page)
             if scenes.hero_chat:
                 shooter.run("tool-card-expanded", scenes.expanded, page)

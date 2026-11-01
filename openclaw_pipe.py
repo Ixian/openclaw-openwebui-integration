@@ -4582,6 +4582,356 @@ async def _answer_plugin_approval(conn, record: dict, kind: str, user_id: str = 
     pipe_log(f"  plugin approval: {await _resolve_plugin_approval(conn, approval_id, decision)}")
 
 
+# --- history_lookup --------------------------------------------------------
+HISTORY_LINE_DIR = "history-line"
+MULTI_MODEL_COLUMNS_MAX = 16
+
+
+def _history_line_id(chat_id: str, column: int = 0) -> str:
+    """The name of a session's line file: the chat's id, then `-m<column>`."""
+    return f"{chat_id}-m{column}" if column else chat_id
+
+
+def _history_column_of(state_dir: str, chat_id: str, ids) -> int | None:
+    """The column whose line holds one of the message `ids`, if any: where a
+    reply the user goes on from was answered. Columns are made in order, so
+    the first one without a line is the last."""
+    ids = [i for i in ids if i]
+    for column in range(MULTI_MODEL_COLUMNS_MAX):
+        path = _history_line_path(state_dir, _history_line_id(chat_id, column))
+        if column and not os.path.exists(path):
+            break
+        tail = _history_line_read(state_dir, _history_line_id(chat_id, column))["tail"]
+        if any(i in tail for i in ids):
+            return column
+    return None
+
+
+def _history_line_path(state_dir: str, chat_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", chat_id)[:120]
+    return os.path.join(state_dir, HISTORY_LINE_DIR, f"{safe}.json")
+
+
+def _history_line_read(state_dir: str, chat_id: str) -> dict:
+    data = _read_json_file(_history_line_path(state_dir, chat_id))
+    if not isinstance(data, dict) or not isinstance(data.get("tail"), list):
+        return {"tail": []}
+    return data
+
+
+# --- activity --------------------------------------------------------------
+MARVIN_RELEASE = "marvin-v1.0.0"
+ACTIVITY_STREAM = "bridge_activity"
+ACTIVITY_STREAMS = (ACTIVITY_STREAM, "command_output", "run_status", "plan", "lifecycle")
+ACTIVITY_PREVIEW_CHARS = 8000
+ACTIVITY_MAX_CALLS = 50
+
+
+def _activity_plain(value, limit=160):
+    text = " ".join(str(value or "").split())
+    return text[:limit]
+
+
+def _activity_escape(value):
+    # Gateway text must never create links, HTML, headings or code fences.
+    return re.sub(r"([\\`*_{}\[\]()#!|~])", r"\\\1", html.escape(str(value or "")))
+
+
+def _activity_output(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "\n".join(_activity_output(v) for v in value)
+    if not isinstance(value, dict):
+        return ""
+    content = value.get("content")
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content
+                         if isinstance(b, dict) and b.get("type") in ("text", "output_text")
+                         and isinstance(b.get("text"), str))
+    for key in ("output", "stdout", "text"):
+        if isinstance(value.get(key), str):
+            return value[key]
+    return ""
+
+
+def _activity_title(name, args):
+    args = args if isinstance(args, dict) else {}
+    for key in ("title", "label", "description"):
+        if isinstance(args.get(key), str) and args[key].strip():
+            return _activity_plain(args[key])
+    if name in ("read", "write", "edit", "apply_patch"):
+        return _activity_plain(f"{name} {args.get('path') or args.get('file_path') or ''}")
+    if name in ("web_search", "memory_search"):
+        return _activity_plain(f"{name}: {args.get('query') or ''}")
+    if name in ("exec", "bash", "shell"):
+        # Do not expose an inline script, a token, or a whole shell pipeline in a title.
+        return "Run command"
+    return _activity_plain(name or "Tool")
+
+
+def _activity_card(value, session):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or value.get("sessionKey") != session:
+        raise ValueError("Progress card belongs to another session")
+    rev = value.get("revision")
+    if isinstance(rev, bool) or not isinstance(rev, int) or rev < 1:
+        raise ValueError("Invalid progress revision")
+    steps = value.get("steps", [])
+    if not isinstance(steps, list) or len(steps) > 50:
+        raise ValueError("Invalid progress steps")
+    clean = []
+    for step in steps:
+        if (not isinstance(step, dict) or not isinstance(step.get("step"), str)
+                or step.get("status") not in ("pending", "in_progress", "completed")):
+            raise ValueError("Invalid progress step")
+        clean.append({"step": step["step"][:512], "status": step["status"]})
+    markdown = value.get("markdown", "")
+    if not isinstance(markdown, str):
+        raise ValueError("Invalid progress note")
+    return {"revision": rev, "updatedAt": value.get("updatedAt"),
+            "markdown": markdown[:8192], "steps": clean}
+
+
+class _ActivityState:
+    def __init__(self):
+        self.session = ""
+        self.run = ""
+        self.calls = {}
+        self.sequences = {}
+        self.card = None
+        self.card_error = None
+        self.plan = None
+        self.status = "running"
+        self.summary = ""
+        self._shown = ""
+        self._last_emit = 0.0
+
+    def feed(self, payload, now=None):
+        session, run = payload.get("sessionKey"), payload.get("runId")
+        if not session or not run or (self.session and self.session != session):
+            return None
+        self.session = session
+        if self.run != run:
+            # A continuation has its own tool IDs and sequence namespace.
+            self.run = run
+            self.calls = {}
+            self.sequences = {}
+            self.plan = None
+            self.status = "running"
+            self.summary = ""
+            self._shown = ""
+        data = payload.get("data") or {}
+        if not isinstance(data, dict):
+            return None
+        stream, phase = payload.get("stream"), data.get("phase")
+        tcid = data.get("toolCallId") or data.get("itemId")
+        seq = payload.get("seq")
+        identity = (stream, tcid or "")
+        if isinstance(seq, int):
+            if seq <= self.sequences.get(identity, -1):
+                return None
+            self.sequences[identity] = seq
+        force = False
+        if stream == ACTIVITY_STREAM:
+            if "card" in data:
+                card = _activity_card(data["card"], session)
+                if card and self.card and card["revision"] < self.card["revision"]:
+                    return None
+                self.card = card
+            self.card_error = data.get("error")
+            force = True
+        elif stream == "plan":
+            self.plan = _activity_card({"sessionKey": session, "revision": 1,
+                                      "steps": data.get("steps", []),
+                                      "markdown": data.get("explanation", "")}, session)
+            force = True
+        elif stream == "run_status":
+            self.summary = _activity_plain(data.get("message") or phase or "Working")
+        elif stream == "item" and isinstance(data.get("progressText"), str):
+            self.summary = _activity_plain(data["progressText"])
+        elif stream == "lifecycle" and phase in ("end", "error"):
+            self.finish("failed" if phase == "error" else "ended")
+            force = True
+        elif stream in ("tool", "command_output") and tcid:
+            if _is_nested_tool_call(data, self.calls):
+                return None
+            call = self.calls.get(tcid)
+            if call and call["status"] != "running" and phase not in ("result", "completed"):
+                return None
+            if call is None:
+                if len(self.calls) >= ACTIVITY_MAX_CALLS:
+                    return None
+                name, args = data.get("name", "tool"), data.get("args") or {}
+                deferred = _deferred_call_view(name, json.dumps(args))
+                if deferred:
+                    name, args = deferred[0], _json_object(deferred[1])
+                call = {"id": tcid, "name": name, "title": _activity_title(name, args),
+                        "status": "running", "output": "", "clipped": False,
+                        "startedAt": payload.get("ts"), "durationMs": None}
+                self.calls[tcid] = call
+            if isinstance(data.get("title"), str) and data["title"].strip():
+                call["title"] = _activity_plain(data["title"])
+            if isinstance(data.get("durationMs"), (int, float)):
+                call["durationMs"] = max(0, data["durationMs"])
+            raw = (data.get("partialResult") if phase == "update" else
+                   data.get("result") if phase == "result" else data.get("output"))
+            text = _activity_output(raw)
+            if text:
+                force = force or not call["output"]
+                call["output"] = text[-ACTIVITY_PREVIEW_CHARS:]
+                call["clipped"] = len(text) > ACTIVITY_PREVIEW_CHARS
+            if phase == "result" or data.get("status") in ("completed", "failed", "cancelled"):
+                result = raw if isinstance(raw, dict) else {}
+                details = result.get("details") or {}
+                exit_code = data.get("exitCode", result.get("exitCode", details.get("exitCode")))
+                call["status"] = ("failed" if data.get("isError") or exit_code not in (None, 0)
+                                  or data.get("status") == "failed" else
+                                  "cancelled" if data.get("status") == "cancelled" else "completed")
+                force = True
+            elif phase == "start":
+                force = True
+        else:
+            return None
+        if not (self.card or self.plan or self.calls or self.summary or self.card_error):
+            return None
+        text = self.markdown()
+        stamp = time.monotonic() if now is None else now
+        if text == self._shown or (not force and stamp - self._last_emit < 0.5):
+            return None
+        self._shown, self._last_emit = text, stamp
+        tag = hashlib.sha256(f"{session}:{run}".encode()).hexdigest()[:24]
+        return {"id": f"msg_note_activity_{tag}", "text": text}
+
+    def finish(self, status):
+        self.status = status
+        for call in self.calls.values():
+            if call["status"] == "running":
+                call["status"] = "interrupted" if status != "running" else "running"
+
+    def markdown(self):
+        lines = ["### Activity"]
+        card = self.card or self.plan
+        if card:
+            steps = card.get("steps") or []
+            done = sum(s["status"] == "completed" for s in steps)
+            label = "Task progress" if self.card else "Run plan"
+            lines.append(f"**{label}" + (f" · {done}/{len(steps)} steps complete**" if steps else "**"))
+            for step in steps:
+                marker = "x" if step["status"] == "completed" else " "
+                suffix = " (current)" if step["status"] == "in_progress" else ""
+                lines.append(f"- [{marker}] {_activity_escape(step['step'])}{suffix}")
+            if card.get("markdown"):
+                lines.extend(["", _activity_escape(card["markdown"])])
+            if isinstance(card.get("updatedAt"), (int, float)):
+                updated = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(card["updatedAt"] / 1000))
+                lines.append(f"\nLast progress update: {updated}")
+            if self.status != "running" and done < len(steps):
+                lines.append("\nWork remains unfinished. The response ending does not complete the plan.")
+        if self.card_error:
+            lines.append("\nProgress could not be refreshed; showing the last confirmed snapshot.")
+        if self.summary:
+            lines.append("\n" + _activity_escape(self.summary))
+        for call in list(self.calls.values())[-8:]:
+            lines.append(f"\n**{call['status'].capitalize()} · {_activity_escape(call['title'])}**")
+            if call["output"] and call["status"] in ("running", "interrupted", "failed"):
+                # Indented code is inert even when command output contains fences or HTML.
+                lines.append("<pre>" + html.escape(call["output"]) + "</pre>")
+                if call["clipped"]:
+                    lines.append("\nPreview limited to the latest 8,000 characters. Open Activity for retained output.")
+        return '<details open data-openclaw-activity="1"><summary>Task activity</summary>\n\n' + "\n\n".join(lines) + "\n\n</details>"
+
+
+async def _activity_read_card(conn, session):
+    response = await conn.send_request("progressCard.get", {"sessionKey": session}, timeout=5)
+    value = response.get("card")
+    _activity_card(value, session)
+    return value
+
+
+async def _activity_load_output(conn, session, message_id, call_id):
+    response = await conn.send_request("chat.message.get", {
+        "sessionKey": session, "messageId": message_id, "maxChars": 1_000_000}, timeout=10)
+    if not response.get("ok"):
+        return {"available": False, "reason": response.get("unavailableReason", "unavailable")}
+    message = response.get("message") or {}
+    if message.get("toolCallId") == call_id:
+        return {"available": True, "text": _activity_output(message),
+                "truncated": bool((message.get("__openclaw") or {}).get("truncated"))}
+    matches = [b for b in message.get("content", []) if isinstance(b, dict)
+               and b.get("type") in ("toolResult", "tool_result")
+               and (b.get("toolCallId") or b.get("tool_use_id")) == call_id]
+    if len(matches) == 1:
+        metadata = matches[0].get("__openclaw") or message.get("__openclaw") or {}
+        return {"available": True, "text": _activity_output(matches[0]),
+                "truncated": bool(metadata.get("truncated"))}
+    return {"available": False, "reason": "Tool result does not match this call"}
+
+
+async def _activity_snapshot(conn, session):
+    """Read current state, then merge bounded history without regressing live calls."""
+    card_result, history_result = await asyncio.gather(
+        _activity_read_card(conn, session),
+        conn.send_request("chat.history", {"sessionKey": session, "limit": 50,
+                                          "maxChars": 32000}, timeout=5),
+        return_exceptions=True)
+    live = getattr(conn, "_activity_states", {}).get(session)
+    state = copy.deepcopy(live) if live else _ActivityState()
+    history = history_result if isinstance(history_result, dict) else {}
+    refs = {}
+    historical = _ActivityState()
+    for message in history.get("messages", []):
+        if not isinstance(message, dict):
+            continue
+        meta = message.get("__openclaw") or {}
+        run = meta.get("runId") or "history"
+        for event in _history_events([message]):
+            if event.get("stream") != "tool":
+                continue
+            historical.feed({**event, "sessionKey": session, "runId": run})
+        if message.get("role") == "toolResult" and message.get("toolCallId") and meta.get("id"):
+            refs[message["toolCallId"]] = meta["id"]
+        for block in message.get("content", []) if isinstance(message.get("content"), list) else []:
+            if isinstance(block, dict) and block.get("type") in ("toolResult", "tool_result"):
+                tid = block.get("toolCallId") or block.get("tool_use_id")
+                if tid and meta.get("id"):
+                    refs[tid] = (block.get("__openclaw") or {}).get("id") or meta["id"]
+    if not live:
+        state = historical
+    in_flight = history.get("inFlightRun") or {}
+    active_run = in_flight.get("runId")
+    if active_run and (not live or live.run == active_run or live.status != "running"):
+        for event in in_flight.get("events", []):
+            try:
+                state.feed({**event, "runId": active_run, "sessionKey": session})
+            except (TypeError, ValueError):
+                continue
+        if isinstance(in_flight.get("plan"), dict):
+            state.feed({"runId": active_run, "sessionKey": session, "stream": "plan",
+                        "data": in_flight["plan"]})
+    elif not live and not active_run:
+        state.finish("ended")
+    if isinstance(card_result, BaseException):
+        state.card_error = "Progress read failed"
+    else:
+        state.card = _activity_card(card_result, session)
+    calls = []
+    for call in list(state.calls.values())[-20:]:
+        calls.append({**call, "messageId": refs.get(call["id"])})
+    return {"release": MARVIN_RELEASE, "card": state.card, "plan": state.plan,
+            "cardError": bool(state.card_error), "calls": calls,
+            "historyError": isinstance(history_result, BaseException),
+            "historyLimited": bool(history.get("hasMore")), "status": state.status}
+
+
+def _activity_result_preview(text):
+    if len(text) <= 8000:
+        return text
+    note = "\n\n[Bridge preview clipped. Open Activity for retained output.]"
+    return text[:8000 - len(note)] + note
+
+
 # --- gateway ---------------------------------------------------------------
 GATEWAY_SCOPES = ["operator.admin", "operator.read", "operator.write"]
 # A connection for users not in OWNER_USERS. Without operator.admin the
@@ -5470,7 +5820,7 @@ def _tool_call_result_event(tool_call_id: str, result_str: str) -> dict:
             "type": "function_call_output",
             "id": f"fco_{tool_call_id}",
             "call_id": tool_call_id,
-            "output": [{"type": "output_text", "text": result_str[:8000]}],
+            "output": [{"type": "output_text", "text": _activity_result_preview(result_str)}],
             "status": "completed",
         },
     }
@@ -5786,6 +6136,7 @@ class _TurnRenderer:
         self._compactions = 0
         self._compaction_note_id: str | None = None
         self._compaction_before = None
+        self.activity = _ActivityState()
 
     @property
     def received(self) -> str:
@@ -5933,15 +6284,23 @@ class _TurnRenderer:
         return [_tool_call_result_event(tcid, note) for tcid in self._tool_items
                 if tcid not in self._tool_results]
 
-    def close_open_calls(self, note: str) -> list[dict]:
+    def close_open_calls(self, note: str, *, activity_terminal=True) -> list[dict]:
         """Answer every call still open with `note` and return those events.
         Open WebUI runs a streamed `function_call` that has no output when
         the stream ends and sends the result back as a new turn; stored, it
         is a spinner forever."""
         events = self._unanswered(note)
+        if activity_terminal and self.activity.status == "running":
+            self.activity.finish("interrupted")
+        for item in self.output:
+            if activity_terminal and str(item.get("id", "")).startswith("msg_note_activity_"):
+                item["content"] = [{"type": "output_text", "text": self.activity.markdown()}]
+                events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
+                               "item": copy.deepcopy(item)})
         for event in events:
-            self._tool_results.add(event["item"]["call_id"])
-            self.output.append(copy.deepcopy(event["item"]))
+            if event["item"]["type"] == "function_call_output":
+                self._tool_results.add(event["item"]["call_id"])
+                self.output.append(copy.deepcopy(event["item"]))
         return events
 
     def finished_output(self) -> list[dict]:
@@ -5966,6 +6325,22 @@ class _TurnRenderer:
         stream = payload.get("stream")
         name = data.get("name", "")
         phase = data.get("phase", "")
+
+        if payload.get("_bridgeActivity"):
+            try:
+                note = self.activity.feed(payload)
+            except (ValueError, TypeError):
+                note = None
+            if note:
+                item = {"type": "message", "id": note["id"], "role": "assistant",
+                        "status": "completed", "content": [{"type": "output_text", "text": note["text"]}]}
+                at = next((n for n, i in enumerate(self.output) if i.get("id") == note["id"]), None)
+                if at is None:
+                    self.output.append(item)
+                else:
+                    self.output[at] = item
+                events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
+                               "item": copy.deepcopy(item)})
 
         if stream == "assistant":
             raw_delta = data.get("delta")
@@ -6066,6 +6441,14 @@ class _TurnRenderer:
                     event = _tool_call_result_event(tcid, result_str)
                     self.output.append(copy.deepcopy(event["item"]))
                     events.append(event)
+        if stream == "tool" and phase == "start":
+            # The real pending call precedes its presentation, as in the native UI.
+            notes = [i for i in self.output if str(i.get("id", "")).startswith("msg_note_activity_")]
+            if notes:
+                note = notes[-1]
+                self.output.remove(note)
+                self.output.append(note)
+                events.sort(key=lambda e: str((e.get("item") or {}).get("id", "")).startswith("msg_note_activity_") if isinstance(e, dict) else False)
         return events
 
 
@@ -6246,6 +6629,7 @@ class _GatewayConnection:
         # only sends requests (`requests_only`: no subscriptions, it renders
         # nothing); see `_run_request`.
         self.scopes = list(GATEWAY_SCOPES if scopes is None else scopes)
+        self.marvin_release = MARVIN_RELEASE
         self._identity_name = identity_name
         self.requests_only = requests_only
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -7270,8 +7654,66 @@ class _GatewayConnection:
         if note is not None:
             await self._dispatch_run_event({"type": "event", "event": "agent", "payload": note})
 
+    async def _activity_refresh(self, session_key):
+        try:
+            card = await _activity_read_card(self, session_key)
+            data = {"card": card}
+        except Exception:
+            data = {"error": "Progress read failed"}
+        run = getattr(self, "_activity_runs", {}).get(session_key)
+        if run:
+            await self._dispatch_run_event({"type": "event", "event": "agent", "payload": {
+                "sessionKey": session_key, "runId": run, "stream": ACTIVITY_STREAM, "data": data}})
+
+    def _activity_schedule(self, session_key):
+        if "progressCard.get" not in getattr(self, "gateway_methods", ()):
+            return
+        tasks = getattr(self, "_activity_reads", None)
+        if tasks is None:
+            tasks = self._activity_reads = {}
+        if session_key in tasks:
+            self._activity_dirty.add(session_key)
+            return
+        if not hasattr(self, "_activity_dirty"):
+            self._activity_dirty = set()
+
+        async def read():
+            try:
+                while True:
+                    self._activity_dirty.discard(session_key)
+                    await self._activity_refresh(session_key)
+                    if session_key not in self._activity_dirty:
+                        break
+            finally:
+                tasks.pop(session_key, None)
+        tasks[session_key] = spawn_background(read())
+
     async def _dispatch_run_event(self, msg: dict) -> None:
         payload = msg.get("payload", {})
+        session, run = payload.get("sessionKey"), payload.get("runId")
+        if session and run and self.parse_owui_session_key(session):
+            if payload.get("stream") == ACTIVITY_STREAM and not getattr(self, "_activity_runs", {}).get(session):
+                return
+            payload = {**payload, "_bridgeActivity": True}
+            msg = {**msg, "payload": payload}
+            if not hasattr(self, "_activity_runs"):
+                self._activity_runs, self._activity_states = {}, {}
+            previous = self._activity_runs.get(session)
+            self._activity_runs[session] = run
+            if previous != run and payload.get("stream") != ACTIVITY_STREAM:
+                self._activity_schedule(session)
+            state = self._activity_states.setdefault(session, _ActivityState())
+            try:
+                state.feed(payload)
+            except (ValueError, TypeError):
+                pass
+            # Bound the read-only view cache; a dialog can rebuild an evicted row.
+            if len(self._activity_states) > 128:
+                oldest = next(iter(self._activity_states))
+                self._activity_states.pop(oldest, None)
+                self._activity_runs.pop(oldest, None)
+            if payload.get("stream") == "lifecycle" and (payload.get("data") or {}).get("phase") in ("end", "error"):
+                self._activity_runs.pop(session, None)
         spawned = self._spawn_seen(payload) if payload.get("stream") == "tool" else None
         if spawned:
             # The Status dialog's child index (state.py), off the loop.
@@ -8015,6 +8457,11 @@ class _GatewayConnection:
                 #     and runs the Gateway starts itself (ELI-92).
                 #
                 # Both are folded into one path below, first copy wins.
+                if msg.get("type") == "event" and msg.get("event") == "progressCard.changed":
+                    session = (msg.get("payload") or {}).get("sessionKey")
+                    if session and self.parse_owui_session_key(session):
+                        self._activity_schedule(session)
+                    continue
                 if msg.get("type") == "event" and msg.get("event") == "sessions.changed":
                     self._on_sessions_changed(msg.get("payload") or {})
                     continue
@@ -9111,7 +9558,8 @@ def _last_item_text(renderer: "_TurnRenderer") -> str:
     """The text of the run's last message item, the only one a closing
     question can be in; fences never span items. "" when
     the run ended on a tool call."""
-    last = renderer.output[-1] if renderer.output else None
+    last = next((i for i in reversed(renderer.output)
+                 if not str(i.get("id", "")).startswith("msg_note_activity_")), None)
     if last is None or last.get("type") != "message":
         return ""
     return ((last.get("content") or [{}])[0].get("text")) or ""
@@ -9790,7 +10238,8 @@ class _TurnWriter:
         while the run streams, a directive whose filename is still arriving
         held back, as the inline reply holds it."""
         output = self.renderer.finished_output() if final else copy.deepcopy(self.renderer.output)
-        items = [i for i in output if i.get("type") == "message" and i.get("content")]
+        items = [i for i in output if i.get("type") == "message" and i.get("content")
+                 and not str(i.get("id", "")).startswith("msg_note_activity_")]
         # Each message item is read on its own, as the inline reply reads
         # it: an item ends a directive, so the text after a tool card does
         # not run into the filename before it (ELI-147).
@@ -12160,20 +12609,13 @@ HISTORY_TAIL_MAX = 64
 # many.
 HISTORY_SEED_MAX_CHARS = 32_000
 HISTORY_QUOTE_CHARS = 60
-HISTORY_LINE_DIR = "history-line"
 HISTORY_LINE_KEEP_S = 180 * 86400
 # Most Pipe models one message can go to side by side.
-MULTI_MODEL_COLUMNS_MAX = 16
 # One reply carried whole into another column's session.
 HISTORY_REPLY_MAX_CHARS = 8_000
 _history_line_pruned = False
 
 _DETAILS_BLOCK = re.compile(r"<details\b[^>]*>.*?</details>", re.S | re.I)
-
-
-def _history_line_id(chat_id: str, column: int = 0) -> str:
-    """The name of a session's line file: the chat's id, then `-m<column>`."""
-    return f"{chat_id}-m{column}" if column else chat_id
 
 
 def _pipe_model_column(model, models, model_idx=None) -> tuple[int, int]:
@@ -12194,21 +12636,6 @@ def _pipe_model_column(model, models, model_idx=None) -> tuple[int, int]:
     else:
         column = ours.index(model)
     return min(column, MULTI_MODEL_COLUMNS_MAX - 1), len(ours)
-
-
-def _history_column_of(state_dir: str, chat_id: str, ids) -> int | None:
-    """The column whose line holds one of the message `ids`, if any: where a
-    reply the user goes on from was answered. Columns are made in order, so
-    the first one without a line is the last."""
-    ids = [i for i in ids if i]
-    for column in range(MULTI_MODEL_COLUMNS_MAX):
-        path = _history_line_path(state_dir, _history_line_id(chat_id, column))
-        if column and not os.path.exists(path):
-            break
-        tail = _history_line_read(state_dir, _history_line_id(chat_id, column))["tail"]
-        if any(i in tail for i in ids):
-            return column
-    return None
 
 
 async def _reply_column(state_dir: str, chat_id: str | None, model, metadata: dict) -> int:
@@ -12234,18 +12661,6 @@ async def _reply_column(state_dir: str, chat_id: str | None, model, metadata: di
         if found is not None:
             return found
     return 0
-
-
-def _history_line_path(state_dir: str, chat_id: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", chat_id)[:120]
-    return os.path.join(state_dir, HISTORY_LINE_DIR, f"{safe}.json")
-
-
-def _history_line_read(state_dir: str, chat_id: str) -> dict:
-    data = _read_json_file(_history_line_path(state_dir, chat_id))
-    if not isinstance(data, dict) or not isinstance(data.get("tail"), list):
-        return {"tail": []}
-    return data
 
 
 def _history_line_write(state_dir: str, chat_id: str, data: dict) -> None:
@@ -15309,7 +15724,7 @@ class _PipeTurn:
                             self.images_made += 1
                         if stream == COMPACTION_STREAM:
                             pipe_log(f"  Compaction: phase={phase} completed={data.get('completed')}")
-                        if stream in ("assistant", "item", "tool", PIPE_NOTE_STREAM, COMPACTION_STREAM):
+                        if stream in ("assistant", "item", "tool", PIPE_NOTE_STREAM, COMPACTION_STREAM, *ACTIVITY_STREAMS):
                             added = self.renderer.feed(payload)
                             for text in (a for a in added if isinstance(a, str)):
                                 async for chunk in self.show_text(text):
@@ -15370,11 +15785,13 @@ class _PipeTurn:
 
                         # --- The Pipe's own notes (ELI-197), compaction's
                         # among them (ELI-283) ---
-                        if stream in (PIPE_NOTE_STREAM, COMPACTION_STREAM):
-                            for event in (a for a in added if isinstance(a, dict)):
+                        if stream in (PIPE_NOTE_STREAM, COMPACTION_STREAM, "item", *ACTIVITY_STREAMS) or (stream == "tool" and phase not in ("start", "result")):
+                            note_events = [a for a in added if isinstance(a, dict)]
+                            for event in note_events:
                                 yield event
-                            # Text after the note is a new message item.
-                            self.fence_item_start = len(self.assistant_stream_text)
+                            if note_events:
+                                # Only an actual note ends the current text item.
+                                self.fence_item_start = len(self.assistant_stream_text)
 
                         # --- Item events (progress) ---
                         if stream == "item":
@@ -15813,8 +16230,8 @@ class _PipeTurn:
         if not self.adopt_new_run:
             note = ("(interrupted -- the reply continues when the run resumes)"
                     if self.handed_over else TOOL_NO_RESULT_NOTE)
-            for event in self.renderer.close_open_calls(note):
-                pipe_log(f"  closing orphaned tool call {event['item']['call_id']}")
+            for event in self.renderer.close_open_calls(note, activity_terminal=not self.handed_over):
+                pipe_log(f"  closing orphaned tool call {event['item'].get('call_id') or event['item'].get('id')}")
                 yield event
 
     @property

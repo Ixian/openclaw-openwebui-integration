@@ -2135,3 +2135,32 @@ def test_a_channel_mention_opens_a_thread_the_agent_follows(page, token):
         assert _thread_bot_texts(token, cid, root) == [f"CHAN_{n}", f"FOLLOW_{n}", f"AFTER_{n}"]
     finally:
         capture.pipe_valves(token, **old)
+
+
+def test_marvin_activity_stream_reload_and_retained_output(page):
+    """Real Gateway snapshots, output controls and chat reload stay session scoped."""
+    capture.new_chat(page)
+    capture.send(page, "E2E_MARVIN_ACTIVITY")
+    live = page.locator('[data-openclaw-activity="1"]')
+    live.get_by_text('ACTIVITY_FIRST_LINE', exact=False).wait_for(timeout=TURN_MS)
+    assert live.count() == 1
+    assert live.get_by_text('1/2 steps complete', exact=False).count() == 1
+    page.reload()
+    page.wait_for_function("() => document.body.innerText.includes('ACTIVITY_DONE')", timeout=TURN_MS)
+    assert page.locator('[data-openclaw-activity="1"]').count() == 1
+    _open_status(page)
+    section = page.locator('#openclaw-status-section-activity')
+    section.get_by_text('2/2 complete', exact=False).wait_for(timeout=30_000)
+    command = section.locator('details').filter(has_text='Inspect Gateway diagnostic output').first
+    command.locator('summary').click()
+    command.get_by_role('button', name='Load retained output').wait_for(timeout=30_000)
+    command.get_by_role('button', name='Load retained output').click()
+    command.locator('pre').get_by_text('ACTIVITY_RETAINED_END', exact=False).wait_for(timeout=30_000)
+    assert 'ACTIVITY_FIRST_LINE' in command.locator('pre').inner_text()
+    with page.expect_download() as download:
+        command.get_by_role('button', name='Download', exact=True).click()
+    assert download.value.suggested_filename == 'command-output.txt'
+    page.set_viewport_size({'width':390,'height':844})
+    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth + 2')
+    page.keyboard.press('Escape')
+    page.set_viewport_size(capture.DESKTOP['viewport'])

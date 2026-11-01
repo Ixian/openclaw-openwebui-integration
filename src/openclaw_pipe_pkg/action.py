@@ -2882,6 +2882,8 @@ class Action:
         __event_emitter__ = _dialog_safe_emitter(
             __event_emitter__, (__user__ or {}).get("id"), body.get("chat_id"), body.get("id"))
         mode = body.get("mode")
+        if mode in ("activity", "activity-output"):
+            return await self._run_activity(body, __user__, __event_emitter__)
         if mode == "compact":
             return await self._run_compact(body, __user__, __event_emitter__)
         if mode == "subagent-detail":
@@ -2922,6 +2924,51 @@ class Action:
                 chat_model=model if ours else None,
             )
 
+    def _activity_session(self, body, user_id, chat_id):
+        previous = _dialog_of(body, user_id)
+        if previous and previous.get("chat_id") == chat_id:
+            return previous["session"]
+        column = _history_column_of(self.valves.STATE_DIR, chat_id, [body.get("id")]) or 0
+        return _owui_session_key(self.valves.AGENT_ID, user_id, chat_id, column)
+
+    async def _run_activity(self, body, user, emitter, *, _opening_chat=None):
+        user_id = (user or {}).get("id")
+        dialog = _dialog_of(body, user_id)
+        if (not dialog or dialog["closed"].is_set() or dialog["expires"] < time.time()
+                or dialog.get("chat_id") != body.get("chat_id")):
+            return {"status": "error", "detail": "This activity view is closed or belongs to another chat"}
+        if _opening_chat is None and await _owui_chat_title(body.get("chat_id"), user_id) is None:
+            return {"status": "error", "detail": "Chat access denied"}
+        if dialog.get("activity_busy"):
+            return {"status": "busy"}
+        dialog["activity_busy"] = True
+        try:
+            conn, _ = await _get_action_connection(lambda: self.valves)
+            if getattr(conn, "marvin_release", None) != MARVIN_RELEASE:
+                raise ValueError("Install the matched Pipe and Action release before opening Activity")
+            session = dialog["session"]
+            if body.get("mode") == "activity-output":
+                refs = dialog.get("activity_refs", {})
+                call, mid = body.get("callId"), body.get("messageId")
+                if not mid or refs.get(call) != mid:
+                    return {"status": "error", "detail": "This tool result is not in the current view"}
+                result = await _activity_load_output(conn, session, mid, call)
+                code = _render_activity_output({**result, "dialogId": body["dialogId"], "callId": call})
+            else:
+                data = await _activity_snapshot(conn, session)
+                dialog["activity_refs"] = {c["id"]: c["messageId"] for c in data["calls"] if c.get("messageId")}
+                code = _render_activity_view({**data, "dialogId": body["dialogId"]})
+            if not dialog["closed"].is_set():
+                await emitter({"type": "execute", "data": {"code": code}})
+            return {"status": "ok"}
+        except Exception:
+            await emitter({"type": "execute", "data": {"code": _render_activity_view({
+                "dialogId": body["dialogId"], "release": MARVIN_RELEASE,
+                "error": "Activity could not be loaded. Check the matched bridge release and Gateway connection."})}})
+            return {"status": "error", "detail": "Activity unavailable"}
+        finally:
+            dialog["activity_busy"] = False
+
     async def _run_status(self, body: dict, __user__, __event_emitter__, *, show_loading=True, notice=None):
         """Opens the dialog at once with every section's title, then fills
         each section on its own the moment its own data is in (ELI-163): a
@@ -2946,7 +2993,7 @@ class Action:
             })
             return {"status": "error", "detail": "missing chat_id"}
 
-        session_key = _owui_session_key(self.valves.AGENT_ID, user_id, chat_id)
+        session_key = self._activity_session(body, user_id, chat_id)
         # A refresh from inside the dialog (after a compact) replaces the
         # open's reads: the open stops following.
         previous = _dialog_of(body, user_id)
@@ -2954,6 +3001,7 @@ class Action:
             _open_dialogs.pop(body["dialogId"], None)
             previous["closed"].set()
         dialog_id, dialog = _dialog_open(user_id, session_key)
+        dialog["chat_id"] = chat_id
 
         async def emit(code):
             await __event_emitter__({"type": "execute", "data": {"code": code}})
@@ -3004,6 +3052,15 @@ class Action:
                 await emit(_render_section_error_js(section, f"Could not connect: {ex}"))
             await agents_ready
             return {"status": "error", "detail": str(ex)}
+
+        async def fill_activity():
+            methods = getattr(conn, "gateway_methods", ())
+            if isinstance(methods, (list, tuple, set)) and "progressCard.get" in methods:
+                opened_chat = await chat_task
+                if opened_chat is not None:
+                    await self._run_activity({**body, "dialogId": dialog_id, "mode": "activity"},
+                                             __user__, __event_emitter__, _opening_chat=opened_chat)
+        activity_ready = asyncio.ensure_future(fill_activity())
 
         # The chat's run state and its children, which the open follows while
         # the chat runs (ELI-260): taken before the reads they guard.
@@ -3279,6 +3336,7 @@ class Action:
             if isinstance(result, BaseException):
                 pipe_log(f"[status-action] {name} section failed: {result!r}")
                 await emit(_render_section_error_js(name, f"Could not load this section: {result}"))
+        await activity_ready
         listed = results[3] if isinstance(results[3], list) else []
 
         pipe_log(f"[status-action] status dialog filled ({source})")
@@ -3397,7 +3455,7 @@ class Action:
 
         if not chat_id:
             return {"status": "error", "detail": "missing chat_id"}
-        session_key = _owui_session_key(self.valves.AGENT_ID, user_id, chat_id)
+        session_key = self._activity_session(body, user_id, chat_id)
         chat_task = asyncio.ensure_future(_load_owui_recent(chat_id, user_id))
         try:
             conn, source = await _get_action_connection(lambda: self.valves)
@@ -3448,7 +3506,7 @@ class Action:
             })
             return {"status": "error", "detail": "missing chat_id"}
 
-        session_key = _owui_session_key(self.valves.AGENT_ID, user_id, chat_id)
+        session_key = self._activity_session(body, user_id, chat_id)
 
         try:
             conn, source = await _get_action_connection(lambda: self.valves)

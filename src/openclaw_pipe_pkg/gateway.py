@@ -890,7 +890,7 @@ def _tool_call_result_event(tool_call_id: str, result_str: str) -> dict:
             "type": "function_call_output",
             "id": f"fco_{tool_call_id}",
             "call_id": tool_call_id,
-            "output": [{"type": "output_text", "text": result_str[:8000]}],
+            "output": [{"type": "output_text", "text": _activity_result_preview(result_str)}],
             "status": "completed",
         },
     }
@@ -1206,6 +1206,7 @@ class _TurnRenderer:
         self._compactions = 0
         self._compaction_note_id: str | None = None
         self._compaction_before = None
+        self.activity = _ActivityState()
 
     @property
     def received(self) -> str:
@@ -1353,15 +1354,23 @@ class _TurnRenderer:
         return [_tool_call_result_event(tcid, note) for tcid in self._tool_items
                 if tcid not in self._tool_results]
 
-    def close_open_calls(self, note: str) -> list[dict]:
+    def close_open_calls(self, note: str, *, activity_terminal=True) -> list[dict]:
         """Answer every call still open with `note` and return those events.
         Open WebUI runs a streamed `function_call` that has no output when
         the stream ends and sends the result back as a new turn; stored, it
         is a spinner forever."""
         events = self._unanswered(note)
+        if activity_terminal and self.activity.status == "running":
+            self.activity.finish("interrupted")
+        for item in self.output:
+            if activity_terminal and str(item.get("id", "")).startswith("msg_note_activity_"):
+                item["content"] = [{"type": "output_text", "text": self.activity.markdown()}]
+                events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
+                               "item": copy.deepcopy(item)})
         for event in events:
-            self._tool_results.add(event["item"]["call_id"])
-            self.output.append(copy.deepcopy(event["item"]))
+            if event["item"]["type"] == "function_call_output":
+                self._tool_results.add(event["item"]["call_id"])
+                self.output.append(copy.deepcopy(event["item"]))
         return events
 
     def finished_output(self) -> list[dict]:
@@ -1386,6 +1395,22 @@ class _TurnRenderer:
         stream = payload.get("stream")
         name = data.get("name", "")
         phase = data.get("phase", "")
+
+        if payload.get("_bridgeActivity"):
+            try:
+                note = self.activity.feed(payload)
+            except (ValueError, TypeError):
+                note = None
+            if note:
+                item = {"type": "message", "id": note["id"], "role": "assistant",
+                        "status": "completed", "content": [{"type": "output_text", "text": note["text"]}]}
+                at = next((n for n, i in enumerate(self.output) if i.get("id") == note["id"]), None)
+                if at is None:
+                    self.output.append(item)
+                else:
+                    self.output[at] = item
+                events.append({"type": "response.output_item.added", "output_index": _OUTPUT_APPEND_INDEX,
+                               "item": copy.deepcopy(item)})
 
         if stream == "assistant":
             raw_delta = data.get("delta")
@@ -1486,6 +1511,14 @@ class _TurnRenderer:
                     event = _tool_call_result_event(tcid, result_str)
                     self.output.append(copy.deepcopy(event["item"]))
                     events.append(event)
+        if stream == "tool" and phase == "start":
+            # The real pending call precedes its presentation, as in the native UI.
+            notes = [i for i in self.output if str(i.get("id", "")).startswith("msg_note_activity_")]
+            if notes:
+                note = notes[-1]
+                self.output.remove(note)
+                self.output.append(note)
+                events.sort(key=lambda e: str((e.get("item") or {}).get("id", "")).startswith("msg_note_activity_") if isinstance(e, dict) else False)
         return events
 
 
@@ -1666,6 +1699,7 @@ class _GatewayConnection:
         # only sends requests (`requests_only`: no subscriptions, it renders
         # nothing); see `_run_request`.
         self.scopes = list(GATEWAY_SCOPES if scopes is None else scopes)
+        self.marvin_release = MARVIN_RELEASE
         self._identity_name = identity_name
         self.requests_only = requests_only
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -2690,8 +2724,66 @@ class _GatewayConnection:
         if note is not None:
             await self._dispatch_run_event({"type": "event", "event": "agent", "payload": note})
 
+    async def _activity_refresh(self, session_key):
+        try:
+            card = await _activity_read_card(self, session_key)
+            data = {"card": card}
+        except Exception:
+            data = {"error": "Progress read failed"}
+        run = getattr(self, "_activity_runs", {}).get(session_key)
+        if run:
+            await self._dispatch_run_event({"type": "event", "event": "agent", "payload": {
+                "sessionKey": session_key, "runId": run, "stream": ACTIVITY_STREAM, "data": data}})
+
+    def _activity_schedule(self, session_key):
+        if "progressCard.get" not in getattr(self, "gateway_methods", ()):
+            return
+        tasks = getattr(self, "_activity_reads", None)
+        if tasks is None:
+            tasks = self._activity_reads = {}
+        if session_key in tasks:
+            self._activity_dirty.add(session_key)
+            return
+        if not hasattr(self, "_activity_dirty"):
+            self._activity_dirty = set()
+
+        async def read():
+            try:
+                while True:
+                    self._activity_dirty.discard(session_key)
+                    await self._activity_refresh(session_key)
+                    if session_key not in self._activity_dirty:
+                        break
+            finally:
+                tasks.pop(session_key, None)
+        tasks[session_key] = spawn_background(read())
+
     async def _dispatch_run_event(self, msg: dict) -> None:
         payload = msg.get("payload", {})
+        session, run = payload.get("sessionKey"), payload.get("runId")
+        if session and run and self.parse_owui_session_key(session):
+            if payload.get("stream") == ACTIVITY_STREAM and not getattr(self, "_activity_runs", {}).get(session):
+                return
+            payload = {**payload, "_bridgeActivity": True}
+            msg = {**msg, "payload": payload}
+            if not hasattr(self, "_activity_runs"):
+                self._activity_runs, self._activity_states = {}, {}
+            previous = self._activity_runs.get(session)
+            self._activity_runs[session] = run
+            if previous != run and payload.get("stream") != ACTIVITY_STREAM:
+                self._activity_schedule(session)
+            state = self._activity_states.setdefault(session, _ActivityState())
+            try:
+                state.feed(payload)
+            except (ValueError, TypeError):
+                pass
+            # Bound the read-only view cache; a dialog can rebuild an evicted row.
+            if len(self._activity_states) > 128:
+                oldest = next(iter(self._activity_states))
+                self._activity_states.pop(oldest, None)
+                self._activity_runs.pop(oldest, None)
+            if payload.get("stream") == "lifecycle" and (payload.get("data") or {}).get("phase") in ("end", "error"):
+                self._activity_runs.pop(session, None)
         spawned = self._spawn_seen(payload) if payload.get("stream") == "tool" else None
         if spawned:
             # The Status dialog's child index (state.py), off the loop.
@@ -3435,6 +3527,11 @@ class _GatewayConnection:
                 #     and runs the Gateway starts itself (ELI-92).
                 #
                 # Both are folded into one path below, first copy wins.
+                if msg.get("type") == "event" and msg.get("event") == "progressCard.changed":
+                    session = (msg.get("payload") or {}).get("sessionKey")
+                    if session and self.parse_owui_session_key(session):
+                        self._activity_schedule(session)
+                    continue
                 if msg.get("type") == "event" and msg.get("event") == "sessions.changed":
                     self._on_sessions_changed(msg.get("payload") or {})
                     continue

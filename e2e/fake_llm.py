@@ -348,6 +348,13 @@ def _scripted(user_text: str, messages: list, last_assistant: int, turn: list,
     if scripted is not None:
         return scripted
 
+    if "E2E_MARVIN_ACTIVITY" in user_text:
+        with open(os.path.join(os.path.dirname(__file__), "..", "scripts", "screenshots", "scenes.json"), encoding="utf-8") as fh:
+            scene = next(s for s in json.load(fh)["scenes"] if s["match"] == "E2E_MARVIN_ACTIVITY")
+        step = scene["steps"][min(len(tool_results), len(scene["steps"]) - 1)]
+        call = _call_with(step["tool"], step["args"], offered) if "tool" in step else {}
+        return {"text": step["say"], **(call or {})}
+
     if "Create a concise title" in user_text:
         return {"text": TITLE}
 

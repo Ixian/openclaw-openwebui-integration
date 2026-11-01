@@ -202,7 +202,8 @@ def _last_item_text(renderer: "_TurnRenderer") -> str:
     """The text of the run's last message item, the only one a closing
     question can be in; fences never span items. "" when
     the run ended on a tool call."""
-    last = renderer.output[-1] if renderer.output else None
+    last = next((i for i in reversed(renderer.output)
+                 if not str(i.get("id", "")).startswith("msg_note_activity_")), None)
     if last is None or last.get("type") != "message":
         return ""
     return ((last.get("content") or [{}])[0].get("text")) or ""
@@ -881,7 +882,8 @@ class _TurnWriter:
         while the run streams, a directive whose filename is still arriving
         held back, as the inline reply holds it."""
         output = self.renderer.finished_output() if final else copy.deepcopy(self.renderer.output)
-        items = [i for i in output if i.get("type") == "message" and i.get("content")]
+        items = [i for i in output if i.get("type") == "message" and i.get("content")
+                 and not str(i.get("id", "")).startswith("msg_note_activity_")]
         # Each message item is read on its own, as the inline reply reads
         # it: an item ends a directive, so the text after a tool card does
         # not run into the filename before it (ELI-147).

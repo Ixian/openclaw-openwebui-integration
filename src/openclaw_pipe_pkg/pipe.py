@@ -1563,7 +1563,7 @@ class _PipeTurn:
                             self.images_made += 1
                         if stream == COMPACTION_STREAM:
                             pipe_log(f"  Compaction: phase={phase} completed={data.get('completed')}")
-                        if stream in ("assistant", "item", "tool", PIPE_NOTE_STREAM, COMPACTION_STREAM):
+                        if stream in ("assistant", "item", "tool", PIPE_NOTE_STREAM, COMPACTION_STREAM, *ACTIVITY_STREAMS):
                             added = self.renderer.feed(payload)
                             for text in (a for a in added if isinstance(a, str)):
                                 async for chunk in self.show_text(text):
@@ -1624,11 +1624,13 @@ class _PipeTurn:
 
                         # --- The Pipe's own notes (ELI-197), compaction's
                         # among them (ELI-283) ---
-                        if stream in (PIPE_NOTE_STREAM, COMPACTION_STREAM):
-                            for event in (a for a in added if isinstance(a, dict)):
+                        if stream in (PIPE_NOTE_STREAM, COMPACTION_STREAM, "item", *ACTIVITY_STREAMS) or (stream == "tool" and phase not in ("start", "result")):
+                            note_events = [a for a in added if isinstance(a, dict)]
+                            for event in note_events:
                                 yield event
-                            # Text after the note is a new message item.
-                            self.fence_item_start = len(self.assistant_stream_text)
+                            if note_events:
+                                # Only an actual note ends the current text item.
+                                self.fence_item_start = len(self.assistant_stream_text)
 
                         # --- Item events (progress) ---
                         if stream == "item":
@@ -2067,8 +2069,8 @@ class _PipeTurn:
         if not self.adopt_new_run:
             note = ("(interrupted -- the reply continues when the run resumes)"
                     if self.handed_over else TOOL_NO_RESULT_NOTE)
-            for event in self.renderer.close_open_calls(note):
-                pipe_log(f"  closing orphaned tool call {event['item']['call_id']}")
+            for event in self.renderer.close_open_calls(note, activity_terminal=not self.handed_over):
+                pipe_log(f"  closing orphaned tool call {event['item'].get('call_id') or event['item'].get('id')}")
                 yield event
 
     @property

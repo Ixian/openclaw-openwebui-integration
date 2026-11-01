@@ -2,6 +2,57 @@
   "_comment": "Scripted model replies for the README screenshots (capture.py). A scene is picked by a phrase from the user's own message; step n answers the request that carries n tool results. Child scenes come first: a sub-agent's prompt can quote its parent's request.",
   "scenes": [
     {
+      "match": "E2E_MARVIN_ACTIVITY",
+      "steps": [
+        {
+          "say": "Checking the session and command output.",
+          "tool": "progress_card",
+          "args": {
+            "markdown": "Inspecting Gateway health and retained output.",
+            "plan": [
+              {
+                "step": "Check Gateway health",
+                "status": "completed"
+              },
+              {
+                "step": "Inspect command output",
+                "status": "in_progress"
+              }
+            ]
+          }
+        },
+        {
+          "say": "Reading the command output as it arrives.",
+          "tool": "exec",
+          "args": {
+            "command": "python3 -u -c 'import time; print(\"ACTIVITY_FIRST_LINE\",flush=True); [(print(\"sample-%d \"%i+\"x\"*450,flush=True),time.sleep(.35)) for i in range(30)]; print(\"ACTIVITY_RETAINED_END\",flush=True)'",
+            "title": "Inspect Gateway diagnostic output",
+            "yieldMs": 10000
+          }
+        },
+        {
+          "say": "The command finished. Saving task progress.",
+          "tool": "progress_card",
+          "args": {
+            "markdown": "Gateway check and output inspection finished.",
+            "plan": [
+              {
+                "step": "Check Gateway health",
+                "status": "completed"
+              },
+              {
+                "step": "Inspect command output",
+                "status": "completed"
+              }
+            ]
+          }
+        },
+        {
+          "say": "ACTIVITY_DONE Diagnostic output is available in Activity."
+        }
+      ]
+    },
+    {
       "match": "which of the two works for everyone",
       "steps": [
         {

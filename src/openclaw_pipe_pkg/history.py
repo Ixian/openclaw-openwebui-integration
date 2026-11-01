@@ -53,20 +53,13 @@ HISTORY_TAIL_MAX = 64
 # many.
 HISTORY_SEED_MAX_CHARS = 32_000
 HISTORY_QUOTE_CHARS = 60
-HISTORY_LINE_DIR = "history-line"
 HISTORY_LINE_KEEP_S = 180 * 86400
 # Most Pipe models one message can go to side by side.
-MULTI_MODEL_COLUMNS_MAX = 16
 # One reply carried whole into another column's session.
 HISTORY_REPLY_MAX_CHARS = 8_000
 _history_line_pruned = False
 
 _DETAILS_BLOCK = re.compile(r"<details\b[^>]*>.*?</details>", re.S | re.I)
-
-
-def _history_line_id(chat_id: str, column: int = 0) -> str:
-    """The name of a session's line file: the chat's id, then `-m<column>`."""
-    return f"{chat_id}-m{column}" if column else chat_id
 
 
 def _pipe_model_column(model, models, model_idx=None) -> tuple[int, int]:
@@ -87,21 +80,6 @@ def _pipe_model_column(model, models, model_idx=None) -> tuple[int, int]:
     else:
         column = ours.index(model)
     return min(column, MULTI_MODEL_COLUMNS_MAX - 1), len(ours)
-
-
-def _history_column_of(state_dir: str, chat_id: str, ids) -> int | None:
-    """The column whose line holds one of the message `ids`, if any: where a
-    reply the user goes on from was answered. Columns are made in order, so
-    the first one without a line is the last."""
-    ids = [i for i in ids if i]
-    for column in range(MULTI_MODEL_COLUMNS_MAX):
-        path = _history_line_path(state_dir, _history_line_id(chat_id, column))
-        if column and not os.path.exists(path):
-            break
-        tail = _history_line_read(state_dir, _history_line_id(chat_id, column))["tail"]
-        if any(i in tail for i in ids):
-            return column
-    return None
 
 
 async def _reply_column(state_dir: str, chat_id: str | None, model, metadata: dict) -> int:
@@ -127,18 +105,6 @@ async def _reply_column(state_dir: str, chat_id: str | None, model, metadata: di
         if found is not None:
             return found
     return 0
-
-
-def _history_line_path(state_dir: str, chat_id: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", chat_id)[:120]
-    return os.path.join(state_dir, HISTORY_LINE_DIR, f"{safe}.json")
-
-
-def _history_line_read(state_dir: str, chat_id: str) -> dict:
-    data = _read_json_file(_history_line_path(state_dir, chat_id))
-    if not isinstance(data, dict) or not isinstance(data.get("tail"), list):
-        return {"tail": []}
-    return data
 
 
 def _history_line_write(state_dir: str, chat_id: str, data: dict) -> None:

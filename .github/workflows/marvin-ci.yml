@@ -1,0 +1,43 @@
+name: Marvin CI
+on:
+  push:
+    branches: [marvin]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.3.2
+      - uses: oven-sh/setup-bun@v2
+      - run: python3 build.py --check-all
+      - run: uvx ruff@0.17.0 check .
+      - run: uv run --with-requirements requirements-dev.txt --with websockets==17.3 pytest -q
+      - run: uv run --with-requirements requirements-dev.txt --with websockets==17.3 python scripts/check_artifacts_load.py
+  browser:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/stack
+        with:
+          owui_image: ghcr.io/open-webui/open-webui:v0.12.5-slim@sha256:9a4db3e6c8d6174d4ed8952304115e90dcc36e9a8b98c2f8984eab321f29505e
+          openclaw_version: '2026.10.9'
+          log_dir: ${{ runner.temp }}/logs
+      - run: uv run --with-requirements requirements-browser.txt python -m playwright install --with-deps chromium
+      # Only fresh-stack flows. No test stops or restarts any service/container.
+      - run: uv run --with-requirements requirements-dev.txt --with-requirements requirements-browser.txt pytest -q e2e/test_browser_flows.py -k 'marvin_activity or tool_card'
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: marvin-browser-logs
+          path: ${{ runner.temp }}/logs
