@@ -2157,10 +2157,18 @@ def test_marvin_activity_stream_reload_and_retained_output(page):
     command.get_by_role('button', name='Load retained output').wait_for(timeout=30_000)
     command.get_by_role('button', name='Load retained output').click()
     command.locator('pre').get_by_text('ACTIVITY_RETAINED_END', exact=False).wait_for(timeout=30_000)
-    assert 'ACTIVITY_FIRST_LINE' in command.locator('pre').inner_text()
+    retained = command.locator('pre').inner_text()
+    assert 'ACTIVITY_FIRST_LINE' in retained
+    assert len(retained) > 8000
+    page.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+    command.get_by_role('button', name='Copy', exact=True).click()
+    page.wait_for_function("() => navigator.clipboard.readText().then(t => t.includes('ACTIVITY_RETAINED_END'))")
+    assert page.evaluate('navigator.clipboard.readText()') == retained
     with page.expect_download() as download:
         command.get_by_role('button', name='Download', exact=True).click()
     assert download.value.suggested_filename == 'command-output.txt'
+    with open(download.value.path(), encoding='utf-8') as saved:
+        assert saved.read() == retained
     page.set_viewport_size({'width':390,'height':844})
     assert not page.evaluate('document.documentElement.scrollWidth > innerWidth + 2')
     page.keyboard.press('Escape')

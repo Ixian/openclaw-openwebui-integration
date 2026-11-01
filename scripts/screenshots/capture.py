@@ -564,6 +564,7 @@ class Scenes:
         send(page, "E2E_MARVIN_ACTIVITY")
         view = page.locator('[data-openclaw-activity="1"]')
         view.get_by_text('ACTIVITY_FIRST_LINE', exact=False).wait_for(timeout=30_000)
+        view.evaluate("e => e.scrollIntoView({block:'center'})")
         self.s.shot(page, "marvin-live-activity", selector='[data-openclaw-activity="1"]')
 
     def marvin_activity(self, page: Page) -> None:
