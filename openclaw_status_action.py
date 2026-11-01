@@ -10004,7 +10004,7 @@ class Action:
 
         async def fill_activity():
             methods = getattr(conn, "gateway_methods", ())
-            if isinstance(methods, (list, tuple, set)) and "progressCard.get" in methods:
+            if isinstance(methods, (list, tuple, set, frozenset)) and "progressCard.get" in methods:
                 opened_chat = await chat_task
                 if opened_chat is not None:
                     await self._run_activity({**body, "dialogId": dialog_id, "mode": "activity"},
