@@ -125,6 +125,7 @@ jobs:
           ./gitleaks git --redact --verbose .
 
   e2e:
+    if: github.repository == 'Eliav2/openclaw-openwebui-integration'
     name: E2E
     needs: [lint, test]
     uses: ./.github/workflows/e2e.yml
@@ -132,6 +133,7 @@ jobs:
       lane: pinned
 
   e2e-next:
+    if: github.repository == 'Eliav2/openclaw-openwebui-integration'
     # The OpenClaw release we are moving to (OPENCLAW_NEXT_VERSION in
     # e2e/versions.env), on the pinned Open WebUI. Blocking, so a change that
     # works on the pinned Gateway but breaks the next one is caught in its own

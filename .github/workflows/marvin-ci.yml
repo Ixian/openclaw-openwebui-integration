@@ -2,6 +2,8 @@ name: Marvin CI
 on:
   push:
     branches: [marvin]
+  pull_request:
+    branches: [marvin]
   workflow_dispatch:
 permissions:
   contents: read

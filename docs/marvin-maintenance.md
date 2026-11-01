@@ -2,7 +2,7 @@
 
 The maintained source is [Ixian/openclaw-openwebui-integration](https://github.com/Ixian/openclaw-openwebui-integration), branch `marvin`. The original upstream is Eliav2/openclaw-openwebui-integration. The first fork base is commit `ec8b8ba51be564b0ca29981fef41eaa4f43d8a68`, matching the original installed Functions.
 
-`main` tracks upstream without homelab changes. Work and releases live on `marvin`. Keep credentials, device identities, chat histories, database backups and complete valve exports outside Git. The local checkout is `/Users/grt/Github/Homelab/openclaw-openwebui-integration`.
+`main` is an unmodified upstream snapshot. Advance it from upstream when reviewing an update. Work and releases live on `marvin`. Keep credentials, device identities, chat histories, database backups and complete valve exports outside Git. The local checkout is `/Users/grt/Github/Homelab/openclaw-openwebui-integration`.
 
 ## What we maintain
 
@@ -13,7 +13,7 @@ The feature's presentation state is derived from Gateway events and read APIs. I
 ## Make an upstream update
 
 1. Review the weekly **Marvin upstream watch** workflow summary for upstream commits. It reports changes and never merges, publishes, deploys or connects to the homelab.
-2. Fetch upstream and create an integration branch from `marvin`. Merge the selected upstream commit into that branch. Resolve conflicts in source fragments, then run `python3 build.py --all`.
+2. Fetch upstream and create an integration branch from `marvin`. Merge the selected upstream commit into that branch and record that commit in the release packager's upstream-base field. Resolve conflicts in source fragments, then run `python3 build.py --all`.
 3. Run the unit suite, artifact loader checks and fresh-stack browser flow. Review changes to Gateway payloads, Open WebUI rendering, dependencies and the function update API. Generate the Activity screenshot through the Screenshots workflow.
 4. Merge the tested integration branch into `marvin`. Package a new versioned release. Update the homelab source lock only after the deployed checks pass.
 
@@ -32,7 +32,7 @@ The upstream remote is `https://github.com/Eliav2/openclaw-openwebui-integration
 
 ## Build and release
 
-The **Marvin CI** workflow runs the unit tests on Python 3.12 and the fresh-stack browser tests on the exact Open WebUI slim image digest and OpenClaw 2026.10.9. Its browser and API regression tests exclude the five upstream scenarios that stop or restart a service. The inherited upstream restart tests remain in the repository for separately authorized test runs.
+The **Marvin CI** workflow runs the unit tests on Python 3.12 and the fresh-stack browser tests on the exact Open WebUI slim image digest and OpenClaw 2026.10.9. Its browser and API regression tests exclude the five upstream scenarios that stop or restart a service. The inherited upstream restart tests remain in the repository for separately authorized test runs. Automatic upstream E2E jobs are gated off in the fork, and its inherited daily Compat watch is disabled; the Marvin workflows control routine testing.
 
 After all checks pass and the working tree is clean:
 
