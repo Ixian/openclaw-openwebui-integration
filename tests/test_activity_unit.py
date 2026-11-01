@@ -165,3 +165,42 @@ class ActivityReadTests(unittest.IsolatedAsyncioTestCase):
         code = a._render_activity_view({"dialogId": "d", "error": "</script><script>evil</script>"})
         self.assertIn("\\u003c", code)
         self.assertNotIn("</script>", code)
+
+
+class ActivityColumnTests(unittest.TestCase):
+    def test_status_selects_the_clicked_model_column(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / 'history-line'
+            folder.mkdir()
+            (folder / 'chat.json').write_text(json.dumps({'tail': ['first']}))
+            (folder / 'chat-m1.json').write_text(json.dumps({'tail': ['second']}))
+            action = a.Action()
+            action.valves.STATE_DIR = directory
+            key = action._activity_session({'id': 'second'}, 'user', 'chat')
+            self.assertEqual(key, 'agent:main:openwebui-user-chat-m1')
+
+    def test_typed_command_output_keeps_failure_and_elapsed_time(self):
+        state = p._ActivityState()
+        state.feed(event(args={'title': 'Check logs'}))
+        state.feed(event(seq=2, stream='command_output', phase='end', status='failed',
+                         exitCode=2, durationMs=1234, output='failed output'))
+        self.assertEqual(state.calls['call1']['status'], 'failed')
+        self.assertEqual(state.calls['call1']['durationMs'], 1234)
+
+    def test_nested_deferred_event_does_not_create_a_duplicate(self):
+        state = p._ActivityState()
+        state.feed(event(name='tool_call', args={'id': 'exec', 'args': {'title': 'Inspect logs'}}))
+        state.feed(event(seq=2, toolCallId='tool_call:call1:exec', parentToolCallId='call1'))
+        self.assertEqual(list(state.calls), ['call1'])
+        self.assertEqual(state.calls['call1']['title'], 'Inspect logs')
+
+    def test_run_plan_does_not_mark_a_saved_task_card_complete(self):
+        state = p._ActivityState()
+        state.feed(event(stream=p.ACTIVITY_STREAM, card=card()))
+        state.feed(event(seq=2, stream='plan', steps=[{'step': 'This run', 'status': 'completed'}]))
+        state.feed(event(seq=3, stream='lifecycle', phase='end'))
+        self.assertIn('Task progress', state.markdown())
+        self.assertIn('Run plan', state.markdown())
+        self.assertEqual(state.card['steps'][0]['status'], 'in_progress')

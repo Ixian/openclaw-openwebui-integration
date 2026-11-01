@@ -32,15 +32,15 @@ The upstream remote is `https://github.com/Eliav2/openclaw-openwebui-integration
 
 ## Build and release
 
-The **Marvin CI** workflow runs the unit tests on Python 3.12 and the fresh-stack browser tests on the exact Open WebUI slim image digest and OpenClaw 2026.10.9. Its selected browser tests never stop or restart services. The inherited upstream restart tests remain in the repository for separately authorized test runs.
+The **Marvin CI** workflow runs the unit tests on Python 3.12 and the fresh-stack browser tests on the exact Open WebUI slim image digest and OpenClaw 2026.10.9. Its browser and API regression tests exclude the five upstream scenarios that stop or restart a service. The inherited upstream restart tests remain in the repository for separately authorized test runs.
 
 After all checks pass and the working tree is clean:
 
 ```bash
-python3 scripts/marvin_release.py --out /tmp/marvin-release
+python3 scripts/marvin_release.py --out /tmp/marvin-release --ci-run PASSING_RUN_ID
 ```
 
-The output contains the matched Pipe, Status Action and `release.json`, including the source commit, upstream base, tested versions, image digest and SHA-256 of both Functions. Tag that source commit, publish the files together on the fork's GitHub Releases page, and deploy that exact set. The two Functions must have the same `MARVIN_RELEASE` constant. The Action refuses a mismatched activity connection.
+The output contains the matched Pipe, Status Action and `release.json`, including the source commit, passing CI run, upstream base, tested versions, image digest and SHA-256 of both Functions. Tag that source commit, publish the files together on the fork's GitHub Releases page, and deploy that exact set. The two Functions must have the same `MARVIN_RELEASE` constant. The Action refuses a mismatched activity connection.
 
 ## Deploy and recover
 

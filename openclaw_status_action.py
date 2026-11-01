@@ -2785,7 +2785,7 @@ class _TurnRenderer:
         if payload.get("_bridgeActivity"):
             try:
                 note = self.activity.feed(payload)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError, OverflowError):
                 note = None
             if note:
                 item = {"type": "message", "id": note["id"], "role": "assistant",
@@ -4161,7 +4161,7 @@ class _GatewayConnection:
             state = self._activity_states.setdefault(session, _ActivityState())
             try:
                 state.feed(payload)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError, OverflowError):
                 pass
             # Bound the read-only view cache; a dialog can rebuild an evicted row.
             if len(self._activity_states) > 128:

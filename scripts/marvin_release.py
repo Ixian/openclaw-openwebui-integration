@@ -16,11 +16,16 @@ def digest(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def package(root, destination):
+def package(root, destination, ci_run):
     subprocess.run(['python3', 'build.py', '--check-all'], cwd=root, check=True)
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip():
         raise ValueError('Commit all changes before packaging a release')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    run = json.loads(subprocess.check_output([
+        'gh', 'api', f'repos/Ixian/openclaw-openwebui-integration/actions/runs/{ci_run}'], text=True))
+    if (run.get('head_sha') != commit or run.get('conclusion') != 'success'
+            or run.get('path') != '.github/workflows/marvin-ci.yml'):
+        raise ValueError('A passing Marvin CI run for this exact commit is required')
     destination.mkdir(parents=True, exist_ok=True)
     artifacts = {}
     releases = set()
@@ -36,6 +41,7 @@ def package(root, destination):
         raise ValueError('Pipe and Action versions differ')
     manifest = {'release': releases.pop(), 'repository': 'https://github.com/Ixian/openclaw-openwebui-integration',
                 'commit': commit, 'upstream_base': UPSTREAM_BASE, 'artifacts': artifacts,
+                'validation': {'ci_run': int(ci_run), 'url': run['html_url']},
                 'tested': {'openwebui': '0.12.5', 'openclaw': '2026.10.9', 'python': '3.12',
                            'websockets': '17.3', 'image': IMAGE}}
     (destination / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
@@ -45,5 +51,6 @@ def package(root, destination):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--ci-run', type=int, required=True)
     args = parser.parse_args()
-    print(json.dumps(package(Path(__file__).resolve().parents[1], args.out), indent=2))
+    print(json.dumps(package(Path(__file__).resolve().parents[1], args.out, args.ci_run), indent=2))
