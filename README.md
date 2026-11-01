@@ -1,3 +1,5 @@
+> Marvin fork: maintained on `marvin` at [Ixian/openclaw-openwebui-integration](https://github.com/Ixian/openclaw-openwebui-integration). See [fork maintenance](docs/marvin-maintenance.md).
+
 # OpenClaw for Open WebUI
 
 [![CI](https://github.com/Eliav2/openclaw-openwebui-integration/actions/workflows/ci.yml/badge.svg)](https://github.com/Eliav2/openclaw-openwebui-integration/actions/workflows/ci.yml)

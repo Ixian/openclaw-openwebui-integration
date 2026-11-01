@@ -12792,7 +12792,9 @@ class GapHandoverReplayTests(_RoutingCase):
                   if e == "events" and d["message_id"] == self.M1
                   and d["data"].get("type") == "response:completion"]
         live = _owui_live_output(_owui_stream(self.first["chunks"])[2] + writer)
-        order = _item_order(live)
+        activity = [i for i in live if str(i.get("id", "")).startswith("msg_note_activity_")]
+        self.assertEqual(len(activity), 1, "activity is replaced across the handover")
+        order = _item_order([i for i in live if i not in activity])
         self.assertEqual([t for t, _id, _x in order],
                          ["message", "function_call", "function_call_output", "message"], order)
         self.assertEqual(self._count(" ".join(x for _t, _id, x in order if x)),

@@ -192,6 +192,7 @@ export default withMermaid(defineConfig({
         text: "Features",
         items: [
           { text: "All features", link: "/features/" },
+          { text: "Task activity", link: "/features/activity" },
           { text: "Chat", link: "/features/chat" },
           { text: "Questions", link: "/features/questions" },
           { text: "Status", link: "/features/status" },
@@ -222,6 +223,7 @@ export default withMermaid(defineConfig({
         items: [
           { text: "Architecture", link: "/architecture" },
           { text: "Development", link: "/development" },
+          { text: "Marvin maintenance", link: "/marvin-maintenance" },
           { text: "Metadata contract", link: "/metadata-contract" },
           { text: "Rehydration and persistence", link: "/rehydration-persistence" },
           { text: "Design: agent turns", link: "/design/agent-turns" },

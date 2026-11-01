@@ -565,7 +565,7 @@ class Scenes:
         wait_js(page, "() => document.body.innerText.includes('ACTIVITY_DONE')", "the diagnostic finishing")
         page.locator('button[aria-label="OpenClaw status"]').click()
         section = page.locator('#openclaw-status-section-activity')
-        section.get_by_text('2/2 complete', exact=False).wait_for(timeout=30_000)
+        section.get_by_text('Task progress · 2/2 complete', exact=True).wait_for(timeout=30_000)
         for detail in section.locator('details').all():
             if 'Inspect Gateway' in detail.inner_text():
                 detail.locator('summary').click()

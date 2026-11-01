@@ -17,6 +17,10 @@ The "Tested in CI" versions are the ones the end-to-end suite runs on for every 
 
 Below the minimums the chat itself still works, but some features break (the table below). The worst cases: on Open WebUI 0.11.0 and older, tool cards keep spinning; on Open WebUI 0.11.1, and on OpenClaw 2026.9.1 or older, cron replies never appear.
 
+## Marvin activity release
+
+The Marvin fork additionally tests task activity and retained-output controls against OpenClaw 2026.10.9, Open WebUI 0.12.5 slim (image digest pinned in Marvin CI), Python 3.12 and websockets 17.3. Activity requires the Gateway methods `progressCard.get` and `chat.message.get`; this release targets that version pair. The upstream historical test matrix below is retained for reference.
+
 ## What each feature needs
 
 | Feature | Needs | On an older release |

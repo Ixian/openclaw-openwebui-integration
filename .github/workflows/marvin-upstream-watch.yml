@@ -1,0 +1,25 @@
+name: Marvin upstream watch
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 13 * * 0'
+permissions:
+  contents: read
+jobs:
+  report:
+    if: github.repository == 'Ixian/openclaw-openwebui-integration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Report commits awaiting review
+        run: |
+          git fetch https://github.com/Eliav2/openclaw-openwebui-integration.git main
+          {
+            echo '### Upstream changes awaiting review'
+            echo 'No merge, release or deployment was performed.'
+            echo '```text'
+            git log --oneline HEAD..FETCH_HEAD
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

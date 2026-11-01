@@ -13,6 +13,8 @@ Everything here works as soon as the Pipe is installed, except entries marked:
 
 ## In the chat
 
+- [**Task activity and command output**](./activity.md): descriptive activity, saved progress, live command previews and retained-output controls
+
 - [**Real-time streaming**](./chat.md#streaming): replies appear token by token, not all at once at the end
 - [**Native tool cards**](./chat.md#tool-cards): tool calls render as Open WebUI's own two-phase cards, expandable to their input and output
 - [**Sub-agent cards**](./chat.md#sub-agent-cards): a sub-agent the agent starts shows as a card named after it, with the head of its task and whether it started
