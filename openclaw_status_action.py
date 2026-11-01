@@ -2,8 +2,8 @@
 title: OpenClaw Status
 author: Eliav
 author_url: https://github.com/Eliav2
-project_url: https://github.com/Eliav2/openclaw-openwebui-integration
-version: 1.0.0
+project_url: https://github.com/Ixian/openclaw-openwebui-integration
+version: 1.0.0+marvin.1
 license: MIT
 requirements: websockets, cryptography
 required_open_webui_version: 0.12.0

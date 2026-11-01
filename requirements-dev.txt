@@ -1,10 +1,9 @@
 # Test and tooling dependencies. One list for CI and local runs:
 #   uv run --with-requirements requirements-dev.txt pytest -q
 #
-# pydantic, cryptography and websockets are the versions Open WebUI locks
-# (uv.lock at the tag in e2e/versions.env): the artifacts run inside Open
-# WebUI's interpreter, so that is what the unit suite should see. Bump them
-# together with e2e/versions.env, not on their own.
+# pydantic and cryptography match Open WebUI's lock. websockets matches the
+# installed bridge runtime (17.3). Marvin CI exercises this dependency set
+# and the pinned slim image; recheck both when preparing an image upgrade.
 pydantic==2.13.4
 cryptography==48.0.1
 websockets==17.3
